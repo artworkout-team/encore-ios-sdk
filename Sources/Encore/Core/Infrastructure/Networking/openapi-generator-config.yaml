@@ -1,0 +1,27 @@
+# =============================================================================
+# Swift OpenAPI Generator Configuration
+# =============================================================================
+# This file configures the swift-openapi-generator CLI.
+#
+# Documentation:
+#   https://swiftpackageindex.com/apple/swift-openapi-generator/documentation
+# =============================================================================
+
+# What to generate:
+#   - types: Request/response models (structs, enums) - NO runtime deps
+#   - client: API client protocol and implementation - REQUIRES runtime deps
+#
+# We only generate types to keep the SDK lightweight.
+# Types are plain Codable structs with zero external dependencies.
+generate:
+  - types
+
+# Access level for generated code
+accessModifier: internal
+
+# Optional: Filter to specific tags or operations
+# filter:
+#   tags:
+#     - publisher
+#     - sdk
+

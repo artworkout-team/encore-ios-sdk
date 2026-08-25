@@ -524,13 +524,40 @@ struct SDUIElementRenderer: View {
         }
     }
 
+    /// A carousel's offer loop must be the target HStack's direct dynamic
+    /// content. Rendering it through a generic `SDUIElementRenderer` wrapper
+    /// makes SwiftUI register the whole loop as one target, so view-aligned
+    /// scrolling can only snap back to the same row.
+    private static func directOfferLoop(in config: SDUIStack) -> SDUIForEach? {
+        guard config.style?.scrollTargetLayout == true,
+              config.children.count == 1,
+              case .forEach(let loop) = config.children[0]
+        else { return nil }
+        guard case .offers = loop.dataSource else { return nil }
+        return loop
+    }
+
     @ViewBuilder
     private func renderHStack(_ config: SDUIStack) -> some View {
         let alignment = config.alignment?.verticalAlignment ?? .center
         let spacing = config.spacing ?? 0
         let hasScrollTargetLayout = config.style?.scrollTargetLayout == true
 
-        if config.lazy == true {
+        if let offerLoop = Self.directOfferLoop(in: config) {
+            if config.lazy == true {
+                LazyHStack(alignment: alignment, spacing: spacing) {
+                    renderOfferItems(offerLoop)
+                }
+                .scrollTargetLayout()
+                .modifier(SDUIStyleModifier(style: config.style))
+            } else {
+                HStack(alignment: alignment, spacing: spacing) {
+                    renderOfferItems(offerLoop)
+                }
+                .scrollTargetLayout()
+                .modifier(SDUIStyleModifier(style: config.style))
+            }
+        } else if config.lazy == true {
             if hasScrollTargetLayout {
                 LazyHStack(alignment: alignment, spacing: spacing) {
                     ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
@@ -653,12 +680,10 @@ struct SDUIElementRenderer: View {
 
     /// Whether this scroll view owns the carousel's `currentIndex`.
     ///
-    /// Only a scroll view with a scroll-target behavior gets
-    /// `.scrollTargetLayout()`, and that layout is exactly what
-    /// `.scrollPosition(id:)` needs to resolve a position against. Bind it
-    /// anywhere else — a plain vertical page scroller — and
-    /// SwiftUI has no candidate to report, so it drives the shared index to
-    /// `nil` and silently clears the selection for the rest of the session.
+    /// Only a scroll view with a target behavior owns live carousel position.
+    /// The actual `.scrollTargetLayout()` belongs on its authored HStack, where
+    /// each offer is a direct target; applying it to the scroll content wrapper
+    /// collapses the whole carousel into one target.
     static func tracksCarouselPosition(_ config: SDUIScrollView) -> Bool {
         config.scrollTargetBehavior != nil
     }
@@ -669,45 +694,7 @@ struct SDUIElementRenderer: View {
     private func renderForEach(_ config: SDUIForEach) -> some View {
         switch config.dataSource {
         case .offers:
-            let limitedOffers = config.limit.map { Array(context.offers.prefix($0)) } ?? context.offers
-            // When the card carries a `scrollTransition` (coverflow), drive each
-            // card's zIndex by its distance from the centered index so the
-            // focused card draws ON TOP of both neighbors. `.scrollTransition`'s
-            // closure can't set zIndex (it returns a VisualEffect, not a View),
-            // and with negative HStack spacing the later sibling (right
-            // neighbor) would otherwise overlap the focused card. Applying
-            // `.zIndex` on the ForEach's direct child reorders the stack's draw
-            // order. `currentIndex` tracks the centered card via viewAligned
-            // snapping. No-op for non-coverflow lists (zIndex stays 0).
-            let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
-            let centeredIndex = context.focusedIndex ?? 0
-            // Impression-firing lives on `renderButton` (offer-acting buttons
-            // fire `onOfferVisible` in their `.onAppear`) — the iteration is
-            // not the right scope, since whether an iteration is "an
-            // impression" depends on whether its rows are interactive.
-            ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
-                SDUIElementRenderer(
-                    element: config.itemTemplate,
-                    context: context,
-                    offer: offerItem,
-                    isCurrentPage: context.focusedIndex == index
-                )
-                .id(index)
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: SDUIScrollTargetSizePreferenceKey.self,
-                            value: proxy.size
-                        )
-                    }
-                }
-                .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
-                // Publish this card's distance from the centered card so
-                // descendant `scrollFade` layers (brand fill, checkmark) fade
-                // reliably by selection state — see SDUIScrollFadeModifier for
-                // why scroll-geometry approaches fail in the real app.
-                .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
-            }
+            renderOfferItems(config)
         case .pageIndicators:
             ForEach(0..<context.offers.count, id: \.self) { index in
                 SDUIElementRenderer(
@@ -717,6 +704,31 @@ struct SDUIElementRenderer: View {
                     isCurrentPage: context.focusedIndex == index
                 )
             }
+        }
+    }
+
+    private func renderOfferItems(_ config: SDUIForEach) -> some View {
+        let limitedOffers = config.limit.map { Array(context.offers.prefix($0)) } ?? context.offers
+        let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
+        let centeredIndex = context.focusedIndex ?? 0
+        return ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
+            SDUIElementRenderer(
+                element: config.itemTemplate,
+                context: context,
+                offer: offerItem,
+                isCurrentPage: context.focusedIndex == index
+            )
+            .id(index)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: SDUIScrollTargetSizePreferenceKey.self,
+                        value: proxy.size
+                    )
+                }
+            }
+            .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
+            .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
         }
     }
     
@@ -952,12 +964,7 @@ private struct SDUIScrollViewRenderer: View {
 
     var body: some View {
         ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
-            if hasScrollTarget {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
-                    .scrollTargetLayout()
-            } else {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
-            }
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(resolvedContentMargin, axis: axis)

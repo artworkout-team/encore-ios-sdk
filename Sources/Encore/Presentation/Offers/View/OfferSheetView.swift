@@ -101,14 +101,6 @@ struct OfferSheetView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.verificationState != .idle)
-        .transaction { transaction in
-            // Only allow animations for the verification overlay —
-            // suppress inherited animations for SDUI content to prevent
-            // flash/opacity shifts on card selection and state transitions.
-            if viewModel.verificationState == .idle {
-                transaction.animation = nil
-            }
-        }
         .onAppear {
             setupContext()
 

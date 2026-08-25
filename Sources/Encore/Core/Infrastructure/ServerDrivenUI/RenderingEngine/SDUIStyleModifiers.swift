@@ -658,12 +658,12 @@ extension View {
     }
     
     @ViewBuilder
-    func applyContentMargins(_ margins: SDUIPadding?, axis: Axis.Set) -> some View {
-        if let margins = margins {
+    func applyContentMargin(_ margin: CGFloat?, axis: Axis.Set) -> some View {
+        if let margin {
             if axis == .horizontal {
-                self.contentMargins(.horizontal, margins.edgeInsets.leading, for: .scrollContent)
+                self.contentMargins(.horizontal, margin, for: .scrollContent)
             } else {
-                self.contentMargins(.vertical, margins.edgeInsets.top, for: .scrollContent)
+                self.contentMargins(.vertical, margin, for: .scrollContent)
             }
         } else {
             self

@@ -486,11 +486,7 @@ struct SDUIElementRenderer: View {
             if let selected = (offer ?? context.currentOffer) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
 
-                // Suppress SwiftUI's default cross-fade on conditional views
-                // that depend on the selection state.
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
+                withAnimation(.easeInOut(duration: 0.25)) {
                     context.selectOffer(selected, primaryKey: action.targetKey ?? "selectedOfferId")
                 }
             }
@@ -648,31 +644,11 @@ struct SDUIElementRenderer: View {
     
     @ViewBuilder
     private func renderScrollView(_ config: SDUIScrollView) -> some View {
-        let axis = config.axis?.axis ?? .vertical
-        let scrollAxis = config.axis ?? .vertical
-        // One flag for both the layout and the position binding, deliberately:
-        // a scroll view may only drive `currentIndex` if it also has the scroll
-        // target layout that lets SwiftUI resolve a position.
-        let hasScrollTarget = Self.tracksCarouselPosition(config)
-
-        // Build scroll view with conditional modifiers
-        ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
-            if hasScrollTarget {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
-                    .scrollTargetLayout()
-            } else {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
-            }
-        }
-        .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyContentMargins(config.contentMargins, axis: axis)
-        .modifier(SDUICarouselPositionModifier(
+        SDUIScrollViewRenderer(
+            config: config,
             context: context,
-            axis: scrollAxis,
-            isEnabled: hasScrollTarget
-        ))
-        .scrollClipDisabled(true)
-        .modifier(SDUIStyleModifier(style: config.style))
+            offer: offer
+        )
     }
 
     /// Whether this scroll view owns the carousel's `currentIndex`.
@@ -717,6 +693,14 @@ struct SDUIElementRenderer: View {
                     isCurrentPage: context.focusedIndex == index
                 )
                 .id(index)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: SDUIScrollTargetSizePreferenceKey.self,
+                            value: proxy.size
+                        )
+                    }
+                }
                 .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
                 // Publish this card's distance from the centered card so
                 // descendant `scrollFade` layers (brand fill, checkmark) fade
@@ -921,6 +905,90 @@ struct SDUIElementRenderer: View {
     }
 }
 
+// MARK: - Scroll View Renderer
+
+/// Renders an SDUI scroll view while adapting centered carousels to the actual
+/// viewport. Phone-authored templates commonly provide fixed edge margins that
+/// are correct for a narrow screen but leave all fixed-width cards inside a
+/// landscape iPad viewport. In that state the ScrollView can only rubber-band,
+/// so a swipe always returns to the first card. Measuring one scroll target lets
+/// us grow the margins just enough for every target to reach the requested
+/// alignment on any device width.
+@available(iOS 17.0, *)
+private struct SDUIScrollViewRenderer: View {
+    let config: SDUIScrollView
+    @ObservedObject var context: SDUIContext
+    let offer: Offer?
+
+    @State private var viewportSize: CGSize = .zero
+    @State private var targetSize: CGSize = .zero
+
+    private var axis: Axis.Set { config.axis?.axis ?? .vertical }
+    private var scrollAxis: SDUIScrollAxis { config.axis ?? .vertical }
+    private var hasScrollTarget: Bool { SDUIElementRenderer.tracksCarouselPosition(config) }
+
+    private var resolvedContentMargin: CGFloat? {
+        let authoredMargin: CGFloat? = {
+            guard let margins = config.contentMargins else { return nil }
+            return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
+        }()
+        guard config.scrollAlignment == .center else { return authoredMargin }
+
+        let viewportLength = axis == .horizontal ? viewportSize.width : viewportSize.height
+        let targetLength = axis == .horizontal ? targetSize.width : targetSize.height
+        guard viewportLength > 0, targetLength > 0 else { return authoredMargin }
+        return max(authoredMargin ?? 0, (viewportLength - targetLength) / 2)
+    }
+
+    var body: some View {
+        ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
+            if hasScrollTarget {
+                SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                    .scrollTargetLayout()
+            } else {
+                SDUIElementRenderer(element: config.content, context: context, offer: offer)
+            }
+        }
+        .applyScrollTargetBehavior(config.scrollTargetBehavior)
+        .applyContentMargin(resolvedContentMargin, axis: axis)
+        .modifier(SDUICarouselPositionModifier(
+            context: context,
+            axis: scrollAxis,
+            alignment: config.scrollAlignment,
+            isEnabled: hasScrollTarget
+        ))
+        .scrollClipDisabled(true)
+        .modifier(SDUIStyleModifier(style: config.style))
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: SDUIScrollViewportSizePreferenceKey.self,
+                    value: proxy.size
+                )
+            }
+        }
+        .onPreferenceChange(SDUIScrollViewportSizePreferenceKey.self) { viewportSize = $0 }
+        .onPreferenceChange(SDUIScrollTargetSizePreferenceKey.self) { targetSize = $0 }
+    }
+}
+
+private struct SDUIScrollViewportSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
+private struct SDUIScrollTargetSizePreferenceKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        value = CGSize(width: max(value.width, next.width), height: max(value.height, next.height))
+    }
+}
+
 // MARK: - Carousel Scroll Position
 
 /// Binds the offer carousel's centred card to `context.currentIndex` — and only
@@ -942,43 +1010,48 @@ struct SDUIElementRenderer: View {
 private struct SDUICarouselPositionModifier: ViewModifier {
     @ObservedObject var context: SDUIContext
     let axis: SDUIScrollAxis
+    let alignment: SDUIScrollAlignment?
     let isEnabled: Bool
+
+    private var position: Binding<Int?> {
+        Binding(
+            get: { context.focusedIndex },
+            set: { newIndex in
+                // A `nil` write means "no resolvable scroll target" — mid
+                // layout, during teardown, or when a state change unmounts
+                // the carousel. It never means the user deselected, so
+                // accepting it would strand `currentOffer` on nothing.
+                guard let newIndex, newIndex != context.currentIndex else { return }
+                // What the scroll view was asked to show. A settle that only
+                // confirms it is the carousel adopting the position we gave
+                // it, not the user moving — see the analytics guard below.
+                let requestedIndex = context.focusedIndex
+                context.currentIndex = newIndex
+
+                // Keep the SELECTED offer in lock-step with the centered
+                // card so `${selectedAdvertiserName}`/logo/description and
+                // the post-IAP congrats screen reference the offer the user
+                // is actually looking at — not a stale tap/initialSelection.
+                // Direct, NON-analytics write; the scroll's only analytics
+                // signal is `trackScroll` below (no per-card value events).
+                context.selectCenteredOffer(at: newIndex)
+
+                // Scroll analytics only — impression-firing is owned by
+                // `View.onVisible` on the loaded primary creative inside
+                // `CachedAsyncImage`, so we don't fan a second path here.
+                // Skipped when the settle merely confirms the requested
+                // position, so restoring the carousel on state re-entry does
+                // not read downstream as a user scroll.
+                if newIndex != requestedIndex {
+                    context.trackScroll(axis: axis, position: newIndex)
+                }
+            }
+        )
+    }
 
     func body(content: Content) -> some View {
         if isEnabled {
-            content.scrollPosition(id: Binding(
-                get: { context.focusedIndex },
-                set: { newIndex in
-                    // A `nil` write means "no resolvable scroll target" — mid
-                    // layout, during teardown, or when a state change unmounts
-                    // the carousel. It never means the user deselected, so
-                    // accepting it would strand `currentOffer` on nothing.
-                    guard let newIndex, newIndex != context.currentIndex else { return }
-                    // What the scroll view was asked to show. A settle that only
-                    // confirms it is the carousel adopting the position we gave
-                    // it, not the user moving — see the analytics guard below.
-                    let requestedIndex = context.focusedIndex
-                    context.currentIndex = newIndex
-
-                    // Keep the SELECTED offer in lock-step with the centered
-                    // card so `${selectedAdvertiserName}`/logo/description and
-                    // the post-IAP congrats screen reference the offer the user
-                    // is actually looking at — not a stale tap/initialSelection.
-                    // Direct, NON-analytics write; the scroll's only analytics
-                    // signal is `trackScroll` below (no per-card value events).
-                    context.selectCenteredOffer(at: newIndex)
-
-                    // Scroll analytics only — impression-firing is owned by
-                    // `View.onVisible` on the loaded primary creative inside
-                    // `CachedAsyncImage`, so we don't fan a second path here.
-                    // Skipped when the settle merely confirms the requested
-                    // position, so restoring the carousel on state re-entry does
-                    // not read downstream as a user scroll.
-                    if newIndex != requestedIndex {
-                        context.trackScroll(axis: axis, position: newIndex)
-                    }
-                }
-            ))
+            content.scrollPosition(id: position, anchor: alignment?.unitPoint)
         } else {
             content
         }

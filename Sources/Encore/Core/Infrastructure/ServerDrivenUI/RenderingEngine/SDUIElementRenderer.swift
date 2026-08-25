@@ -719,14 +719,6 @@ struct SDUIElementRenderer: View {
                 isCurrentPage: context.focusedIndex == index
             )
             .id(index)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: SDUIScrollTargetSizePreferenceKey.self,
-                        value: proxy.size
-                    )
-                }
-            }
             .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
             .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
         }
@@ -920,20 +912,16 @@ struct SDUIElementRenderer: View {
 // MARK: - Scroll View Renderer
 
 /// Renders an SDUI scroll view while adapting centered carousels to the actual
-/// viewport. Phone-authored templates commonly provide fixed edge margins that
-/// are correct for a narrow screen but leave all fixed-width cards inside a
-/// landscape iPad viewport. In that state the ScrollView can only rubber-band,
-/// so a swipe always returns to the first card. Measuring one scroll target lets
-/// us grow the margins just enough for every target to reach the requested
-/// alignment on any device width.
+/// viewport. Phone-authored templates commonly pair a fixed-width card with
+/// edge margins that define the intended picker viewport. Capping a centered
+/// carousel to that authored width keeps the same one-card paging geometry on
+/// a landscape iPad instead of expanding until every offer fits at once.
 @available(iOS 17.0, *)
 private struct SDUIScrollViewRenderer: View {
     let config: SDUIScrollView
     @ObservedObject var context: SDUIContext
     let offer: Offer?
 
-    @State private var viewportSize: CGSize = .zero
-    @State private var targetSize: CGSize = .zero
     @State private var scrollPosition: Int?
 
     private var axis: Axis.Set { config.axis?.axis ?? .vertical }
@@ -948,18 +936,13 @@ private struct SDUIScrollViewRenderer: View {
     }
 
     private var resolvedContentMargin: CGFloat? {
-        let authoredMargin: CGFloat? = {
-            guard let margins = config.contentMargins else { return nil }
-            return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
-        }()
-        let viewportLength = axis == .horizontal ? viewportSize.width : viewportSize.height
-        let targetLength = axis == .horizontal ? targetSize.width : targetSize.height
-        return SDUIScrollLayout.resolvedContentMargin(
-            authoredMargin: authoredMargin,
-            viewportLength: viewportLength,
-            targetLength: targetLength,
-            alignment: config.scrollAlignment
-        )
+        guard let margins = config.contentMargins else { return nil }
+        return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
+    }
+
+    private var centeredViewportMaxWidth: CGFloat? {
+        guard axis == .horizontal, config.scrollAlignment == .center else { return nil }
+        return SDUIScrollLayout.centeredViewportWidth(for: config)
     }
 
     var body: some View {
@@ -975,16 +958,7 @@ private struct SDUIScrollViewRenderer: View {
         ))
         .scrollClipDisabled(true)
         .modifier(SDUIStyleModifier(style: config.style))
-        .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: SDUIScrollViewportSizePreferenceKey.self,
-                    value: proxy.size
-                )
-            }
-        }
-        .onPreferenceChange(SDUIScrollViewportSizePreferenceKey.self) { viewportSize = $0 }
-        .onPreferenceChange(SDUIScrollTargetSizePreferenceKey.self) { targetSize = $0 }
+        .frame(maxWidth: centeredViewportMaxWidth)
         .onChange(of: scrollPosition) { _, newIndex in
             commitScrolledPosition(newIndex)
         }
@@ -1013,33 +987,30 @@ private struct SDUIScrollViewRenderer: View {
 }
 
 enum SDUIScrollLayout {
-    static func resolvedContentMargin(
-        authoredMargin: CGFloat?,
-        viewportLength: CGFloat,
-        targetLength: CGFloat,
-        alignment: SDUIScrollAlignment?
-    ) -> CGFloat? {
-        guard alignment == .center, viewportLength > 0, targetLength > 0 else {
-            return authoredMargin
+    static func centeredViewportWidth(for config: SDUIScrollView) -> CGFloat? {
+        guard case .hStack(let stack) = config.content,
+              stack.children.count == 1,
+              case .forEach(let loop) = stack.children[0],
+              case .offers = loop.dataSource,
+              let itemWidth = fixedWidth(of: loop.itemTemplate)
+        else { return nil }
+
+        let insets = config.contentMargins?.edgeInsets ?? EdgeInsets()
+        return itemWidth + insets.leading + insets.trailing
+    }
+
+    private static func fixedWidth(of element: SDUIElement) -> CGFloat? {
+        switch element {
+        case .button(let config):
+            return config.style?.frame?.width ?? fixedWidth(of: config.content)
+        case .group(let config):
+            return config.style?.frame?.width ?? fixedWidth(of: config.content)
+        case .vStack(let config), .hStack(let config), .zStack(let config):
+            if let width = config.style?.frame?.width { return width }
+            return config.children.lazy.compactMap(fixedWidth(of:)).first
+        default:
+            return nil
         }
-        return max(authoredMargin ?? 0, (viewportLength - targetLength) / 2)
-    }
-}
-
-private struct SDUIScrollViewportSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        value = nextValue()
-    }
-}
-
-private struct SDUIScrollTargetSizePreferenceKey: PreferenceKey {
-    static let defaultValue: CGSize = .zero
-
-    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
-        let next = nextValue()
-        value = CGSize(width: max(value.width, next.width), height: max(value.height, next.height))
     }
 }
 

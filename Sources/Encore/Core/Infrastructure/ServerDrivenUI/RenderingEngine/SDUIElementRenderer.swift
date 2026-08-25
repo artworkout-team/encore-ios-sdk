@@ -932,12 +932,14 @@ private struct SDUIScrollViewRenderer: View {
             guard let margins = config.contentMargins else { return nil }
             return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
         }()
-        guard config.scrollAlignment == .center else { return authoredMargin }
-
         let viewportLength = axis == .horizontal ? viewportSize.width : viewportSize.height
         let targetLength = axis == .horizontal ? targetSize.width : targetSize.height
-        guard viewportLength > 0, targetLength > 0 else { return authoredMargin }
-        return max(authoredMargin ?? 0, (viewportLength - targetLength) / 2)
+        return SDUIScrollLayout.resolvedContentMargin(
+            authoredMargin: authoredMargin,
+            viewportLength: viewportLength,
+            targetLength: targetLength,
+            alignment: config.scrollAlignment
+        )
     }
 
     var body: some View {
@@ -969,6 +971,20 @@ private struct SDUIScrollViewRenderer: View {
         }
         .onPreferenceChange(SDUIScrollViewportSizePreferenceKey.self) { viewportSize = $0 }
         .onPreferenceChange(SDUIScrollTargetSizePreferenceKey.self) { targetSize = $0 }
+    }
+}
+
+enum SDUIScrollLayout {
+    static func resolvedContentMargin(
+        authoredMargin: CGFloat?,
+        viewportLength: CGFloat,
+        targetLength: CGFloat,
+        alignment: SDUIScrollAlignment?
+    ) -> CGFloat? {
+        guard alignment == .center, viewportLength > 0, targetLength > 0 else {
+            return authoredMargin
+        }
+        return max(authoredMargin ?? 0, (viewportLength - targetLength) / 2)
     }
 }
 

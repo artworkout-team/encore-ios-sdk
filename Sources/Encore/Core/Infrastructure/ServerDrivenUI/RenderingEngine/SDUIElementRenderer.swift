@@ -912,10 +912,10 @@ struct SDUIElementRenderer: View {
 // MARK: - Scroll View Renderer
 
 /// Renders an SDUI scroll view while adapting centered carousels to the actual
-/// viewport. Phone-authored templates commonly pair a fixed-width card with
-/// edge margins that define the intended picker viewport. Capping a centered
-/// carousel to that authored width keeps the same one-card paging geometry on
-/// a landscape iPad instead of expanding until every offer fits at once.
+/// viewport. A centered fixed-width carousel needs enough leading/trailing
+/// content margin to place its first and last cards at the viewport center.
+/// The margin is derived synchronously from the GeometryReader proposal, so the
+/// ScrollView keeps its full-width hit region without publishing layout state.
 @available(iOS 17.0, *)
 private struct SDUIScrollViewRenderer: View {
     let config: SDUIScrollView
@@ -940,25 +940,40 @@ private struct SDUIScrollViewRenderer: View {
         return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
     }
 
-    private var centeredViewportMaxWidth: CGFloat? {
-        guard axis == .horizontal, config.scrollAlignment == .center else { return nil }
-        return SDUIScrollLayout.centeredViewportWidth(for: config)
+    private var usesCenteredGeometry: Bool {
+        axis == .horizontal
+            && config.scrollAlignment == .center
+            && SDUIScrollLayout.offerItemWidth(for: config) != nil
     }
 
+    @ViewBuilder
     var body: some View {
+        if usesCenteredGeometry {
+            GeometryReader { proxy in
+                scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
+                    for: config,
+                    viewportWidth: proxy.size.width
+                ))
+            }
+            .modifier(SDUIStyleModifier(style: config.style))
+        } else {
+            scrollView(contentMargin: resolvedContentMargin)
+                .modifier(SDUIStyleModifier(style: config.style))
+        }
+    }
+
+    private func scrollView(contentMargin: CGFloat?) -> some View {
         ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
             SDUIElementRenderer(element: config.content, context: context, offer: offer)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyContentMargin(resolvedContentMargin, axis: axis)
+        .applyContentMargin(contentMargin, axis: axis)
         .modifier(SDUICarouselPositionModifier(
             position: $scrollPosition,
             alignment: config.scrollAlignment,
             isEnabled: hasScrollTarget
         ))
         .scrollClipDisabled(true)
-        .modifier(SDUIStyleModifier(style: config.style))
-        .frame(maxWidth: centeredViewportMaxWidth)
         .onChange(of: scrollPosition) { _, newIndex in
             commitScrolledPosition(newIndex)
         }
@@ -987,16 +1002,20 @@ private struct SDUIScrollViewRenderer: View {
 }
 
 enum SDUIScrollLayout {
-    static func centeredViewportWidth(for config: SDUIScrollView) -> CGFloat? {
+    static func centeredContentMargin(for config: SDUIScrollView, viewportWidth: CGFloat) -> CGFloat? {
+        guard let itemWidth = offerItemWidth(for: config) else { return nil }
+        let authoredMargin = config.contentMargins?.edgeInsets.leading ?? 0
+        return max(authoredMargin, (viewportWidth - itemWidth) / 2)
+    }
+
+    static func offerItemWidth(for config: SDUIScrollView) -> CGFloat? {
         guard case .hStack(let stack) = config.content,
               stack.children.count == 1,
               case .forEach(let loop) = stack.children[0],
               case .offers = loop.dataSource,
               let itemWidth = fixedWidth(of: loop.itemTemplate)
         else { return nil }
-
-        let insets = config.contentMargins?.edgeInsets ?? EdgeInsets()
-        return itemWidth + insets.leading + insets.trailing
+        return itemWidth
     }
 
     private static func fixedWidth(of element: SDUIElement) -> CGFloat? {

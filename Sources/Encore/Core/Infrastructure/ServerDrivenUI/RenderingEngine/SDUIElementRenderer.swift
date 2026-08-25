@@ -922,10 +922,18 @@ private struct SDUIScrollViewRenderer: View {
 
     @State private var viewportSize: CGSize = .zero
     @State private var targetSize: CGSize = .zero
+    @State private var scrollPosition: Int?
 
     private var axis: Axis.Set { config.axis?.axis ?? .vertical }
     private var scrollAxis: SDUIScrollAxis { config.axis ?? .vertical }
     private var hasScrollTarget: Bool { SDUIElementRenderer.tracksCarouselPosition(config) }
+
+    init(config: SDUIScrollView, context: SDUIContext, offer: Offer?) {
+        self.config = config
+        self.context = context
+        self.offer = offer
+        _scrollPosition = State(initialValue: context.focusedIndex)
+    }
 
     private var resolvedContentMargin: CGFloat? {
         let authoredMargin: CGFloat? = {
@@ -954,8 +962,7 @@ private struct SDUIScrollViewRenderer: View {
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(resolvedContentMargin, axis: axis)
         .modifier(SDUICarouselPositionModifier(
-            context: context,
-            axis: scrollAxis,
+            position: $scrollPosition,
             alignment: config.scrollAlignment,
             isEnabled: hasScrollTarget
         ))
@@ -971,6 +978,30 @@ private struct SDUIScrollViewRenderer: View {
         }
         .onPreferenceChange(SDUIScrollViewportSizePreferenceKey.self) { viewportSize = $0 }
         .onPreferenceChange(SDUIScrollTargetSizePreferenceKey.self) { targetSize = $0 }
+        .onChange(of: scrollPosition) { _, newIndex in
+            commitScrolledPosition(newIndex)
+        }
+        .onChange(of: context.focusedIndex) { _, newIndex in
+            guard newIndex != scrollPosition else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                scrollPosition = newIndex
+            }
+        }
+    }
+
+    private func commitScrolledPosition(_ newIndex: Int?) {
+        // A `nil` write means "no resolvable scroll target" during layout or
+        // teardown. It never means the user deselected the current offer.
+        guard let newIndex, newIndex != context.currentIndex else { return }
+        let requestedIndex = context.focusedIndex
+        context.currentIndex = newIndex
+        context.selectCenteredOffer(at: newIndex)
+
+        // A context-driven tap sets `currentIndex` before moving the local
+        // scroll position, so only a finger-driven settle reaches this branch.
+        if newIndex != requestedIndex {
+            context.trackScroll(axis: scrollAxis, position: newIndex)
+        }
     }
 }
 
@@ -1007,67 +1038,27 @@ private struct SDUIScrollTargetSizePreferenceKey: PreferenceKey {
 
 // MARK: - Carousel Scroll Position
 
-/// Binds the offer carousel's centred card to `context.currentIndex` — and only
-/// for the scroll view that actually owns the carousel.
+/// Binds a carousel to view-local scroll state — and only for the scroll view
+/// that actually owns the carousel.
 ///
-/// `currentIndex` is engine-wide state: `currentOffer`, the coverflow zIndex and
-/// the page indicator all read it. A variant may nest several scroll views
-/// around one carousel (`featuredOfferCarousel` has three), and every one of
-/// them used to get this binding, so a vertical scroller with no scroll-target
-/// layout would report "no position" and clear the index the carousel had just
-/// set. `SDUIElementRenderer.tracksCarouselPosition` gates that.
+/// `SDUIContext.currentIndex` is committed selection state, not a suitable
+/// two-way ScrollView binding: publishing that same value back from the binding
+/// getter during a drag makes SwiftUI restore the old card before the gesture
+/// can settle. The renderer owns the live position instead, then commits it to
+/// the context from `onChange` after SwiftUI resolves a new centered target.
 ///
-/// The binding READS `focusedIndex`, not `currentIndex`: a state transition
-/// remounts the carousel with no position of its own, and a nil id leaves the
-/// scroll view at its natural origin — the first card — while the highlight and
-/// the CTA still name the offer the user picked. Reading through the selection
-/// makes it open on that offer instead.
+/// A variant may nest several scroll views around one carousel; only the scroll
+/// view with target behavior receives this modifier, so a page scroller cannot
+/// clear or overwrite the carousel position.
 @available(iOS 17.0, *)
 private struct SDUICarouselPositionModifier: ViewModifier {
-    @ObservedObject var context: SDUIContext
-    let axis: SDUIScrollAxis
+    @Binding var position: Int?
     let alignment: SDUIScrollAlignment?
     let isEnabled: Bool
 
-    private var position: Binding<Int?> {
-        Binding(
-            get: { context.focusedIndex },
-            set: { newIndex in
-                // A `nil` write means "no resolvable scroll target" — mid
-                // layout, during teardown, or when a state change unmounts
-                // the carousel. It never means the user deselected, so
-                // accepting it would strand `currentOffer` on nothing.
-                guard let newIndex, newIndex != context.currentIndex else { return }
-                // What the scroll view was asked to show. A settle that only
-                // confirms it is the carousel adopting the position we gave
-                // it, not the user moving — see the analytics guard below.
-                let requestedIndex = context.focusedIndex
-                context.currentIndex = newIndex
-
-                // Keep the SELECTED offer in lock-step with the centered
-                // card so `${selectedAdvertiserName}`/logo/description and
-                // the post-IAP congrats screen reference the offer the user
-                // is actually looking at — not a stale tap/initialSelection.
-                // Direct, NON-analytics write; the scroll's only analytics
-                // signal is `trackScroll` below (no per-card value events).
-                context.selectCenteredOffer(at: newIndex)
-
-                // Scroll analytics only — impression-firing is owned by
-                // `View.onVisible` on the loaded primary creative inside
-                // `CachedAsyncImage`, so we don't fan a second path here.
-                // Skipped when the settle merely confirms the requested
-                // position, so restoring the carousel on state re-entry does
-                // not read downstream as a user scroll.
-                if newIndex != requestedIndex {
-                    context.trackScroll(axis: axis, position: newIndex)
-                }
-            }
-        )
-    }
-
     func body(content: Content) -> some View {
         if isEnabled {
-            content.scrollPosition(id: position, anchor: alignment?.unitPoint)
+            content.scrollPosition(id: $position, anchor: alignment?.unitPoint)
         } else {
             content
         }

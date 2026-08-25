@@ -923,6 +923,7 @@ private struct SDUIScrollViewRenderer: View {
     let offer: Offer?
 
     @State private var scrollPosition: Int?
+    @State private var programmaticScrollTarget: Int?
 
     private var axis: Axis.Set { config.axis?.axis ?? .vertical }
     private var scrollAxis: SDUIScrollAxis { config.axis ?? .vertical }
@@ -933,6 +934,7 @@ private struct SDUIScrollViewRenderer: View {
         self.context = context
         self.offer = offer
         _scrollPosition = State(initialValue: context.focusedIndex)
+        _programmaticScrollTarget = State(initialValue: nil)
     }
 
     private var resolvedContentMargin: CGFloat? {
@@ -980,7 +982,7 @@ private struct SDUIScrollViewRenderer: View {
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(contentMargin, axis: axis)
         .modifier(SDUICarouselPositionModifier(
-            position: $scrollPosition,
+            position: carouselPosition,
             alignment: config.scrollAlignment,
             isEnabled: hasScrollTarget
         ))
@@ -990,11 +992,35 @@ private struct SDUIScrollViewRenderer: View {
         }
     }
 
+    private var carouselPosition: Binding<Int?> {
+        Binding(
+            get: { scrollPosition },
+            set: { newPosition in
+                guard programmaticScrollTarget == nil else { return }
+                scrollPosition = newPosition
+            }
+        )
+    }
+
     private func animateContextSelection(_ newIndex: Int?, with proxy: ScrollViewProxy) {
         guard let newIndex, newIndex != scrollPosition else { return }
-        withAnimation(.easeInOut(duration: 0.35)) {
-            scrollPosition = newIndex
+        var setupTransaction = Transaction()
+        setupTransaction.disablesAnimations = true
+        withTransaction(setupTransaction) {
+            programmaticScrollTarget = newIndex
+            scrollPosition = nil
+        }
+
+        withAnimation(.easeInOut(duration: 0.35), completionCriteria: .logicallyComplete) {
             proxy.scrollTo(newIndex, anchor: config.scrollAlignment?.unitPoint)
+        } completion: {
+            guard programmaticScrollTarget == newIndex else { return }
+            var completionTransaction = Transaction()
+            completionTransaction.disablesAnimations = true
+            withTransaction(completionTransaction) {
+                programmaticScrollTarget = nil
+                scrollPosition = newIndex
+            }
         }
     }
 

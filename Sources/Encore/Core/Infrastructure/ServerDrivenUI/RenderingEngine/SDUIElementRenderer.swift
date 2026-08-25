@@ -948,17 +948,28 @@ private struct SDUIScrollViewRenderer: View {
 
     @ViewBuilder
     var body: some View {
-        if usesCenteredGeometry {
-            GeometryReader { proxy in
-                scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
-                    for: config,
-                    viewportWidth: proxy.size.width
-                ))
+        ScrollViewReader { scrollProxy in
+            Group {
+                if usesCenteredGeometry {
+                    GeometryReader { geometryProxy in
+                        scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
+                            for: config,
+                            viewportWidth: geometryProxy.size.width
+                        ))
+                    }
+                    .modifier(SDUIStyleModifier(style: config.style))
+                } else {
+                    scrollView(contentMargin: resolvedContentMargin)
+                        .modifier(SDUIStyleModifier(style: config.style))
+                }
             }
-            .modifier(SDUIStyleModifier(style: config.style))
-        } else {
-            scrollView(contentMargin: resolvedContentMargin)
-                .modifier(SDUIStyleModifier(style: config.style))
+            .onAppear {
+                guard let index = context.focusedIndex else { return }
+                scrollProxy.scrollTo(index, anchor: config.scrollAlignment?.unitPoint)
+            }
+            .onChange(of: context.focusedIndex) { _, newIndex in
+                animateContextSelection(newIndex, with: scrollProxy)
+            }
         }
     }
 
@@ -977,11 +988,13 @@ private struct SDUIScrollViewRenderer: View {
         .onChange(of: scrollPosition) { _, newIndex in
             commitScrolledPosition(newIndex)
         }
-        .onChange(of: context.focusedIndex) { _, newIndex in
-            guard newIndex != scrollPosition else { return }
-            withAnimation(.easeInOut(duration: 0.25)) {
-                scrollPosition = newIndex
-            }
+    }
+
+    private func animateContextSelection(_ newIndex: Int?, with proxy: ScrollViewProxy) {
+        guard let newIndex, newIndex != scrollPosition else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            scrollPosition = newIndex
+            proxy.scrollTo(newIndex, anchor: config.scrollAlignment?.unitPoint)
         }
     }
 

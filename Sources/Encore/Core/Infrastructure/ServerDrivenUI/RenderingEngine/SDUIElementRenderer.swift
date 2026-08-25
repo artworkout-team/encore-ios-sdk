@@ -861,7 +861,10 @@ struct SDUIElementRenderer: View {
                 SDUIElementRenderer(element: ifFalse, context: context, offer: offer, isCurrentPage: isCurrentPage)
             }
         }
-        .transaction { $0.animation = nil }
+        // Keep state-branch replacement free of an inherited crossfade without
+        // clearing animation transactions for interactive descendants such as
+        // a carousel's explicit tap-to-scroll animation.
+        .transition(.identity)
     }
     
     // MARK: - Group Renderer

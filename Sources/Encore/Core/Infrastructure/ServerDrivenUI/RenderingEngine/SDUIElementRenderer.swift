@@ -1069,6 +1069,14 @@ private struct SDUIScrollViewRenderer: View {
             .onChange(of: context.focusedIndex) { _, newIndex in
                 animateContextSelection(newIndex, with: scrollProxy)
             }
+            .transaction { transaction in
+                // OfferSheetView suppresses steady-state descendant animations
+                // on iOS 17 to avoid a render loop. A programmatic card change
+                // is bounded, so explicitly opt this subtree back into the
+                // scroll animation while its target is active.
+                guard programmaticScrollTarget != nil else { return }
+                transaction.animation = .easeInOut(duration: 0.35)
+            }
         }
     }
 

@@ -101,6 +101,17 @@ struct OfferSheetView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.verificationState != .idle)
+        .transaction { transaction in
+            // iOS 17 drives every active SDUI animation through root view
+            // invalidation. A screen with several repeat-forever effects can
+            // otherwise saturate the main thread before scene activation
+            // completes. iOS 18+ does not exhibit this behavior, so preserve
+            // its normal descendant animations.
+            guard #unavailable(iOS 18.0),
+                  viewModel.verificationState == .idle
+            else { return }
+            transaction.animation = nil
+        }
         .onAppear {
             setupContext()
 

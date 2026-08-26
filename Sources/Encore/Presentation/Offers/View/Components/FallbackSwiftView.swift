@@ -267,6 +267,22 @@ private struct ScrollOfferPager: View {
     let offerContext: OfferContext
     let isClaimDisabled: Bool
     let onOfferTap: @MainActor (Offer) -> Void
+    @State private var scrollPosition: Int?
+
+    init(
+        offers: [Offer],
+        currentIndex: Binding<Int?>,
+        offerContext: OfferContext,
+        isClaimDisabled: Bool,
+        onOfferTap: @escaping @MainActor (Offer) -> Void
+    ) {
+        self.offers = offers
+        self._currentIndex = currentIndex
+        self.offerContext = offerContext
+        self.isClaimDisabled = isClaimDisabled
+        self.onOfferTap = onOfferTap
+        self._scrollPosition = State(initialValue: currentIndex.wrappedValue)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -291,7 +307,7 @@ private struct ScrollOfferPager: View {
                 }
                 .scrollTargetLayout()
             }
-            .scrollPosition(id: $currentIndex.animation(.default))
+            .scrollPosition(id: $scrollPosition.animation(.default))
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .onPreferenceChange(OfferPageCenterPreferenceKey.self) { pageCenters in
                 updateVisiblePage(from: pageCenters, viewportCenter: geometry.frame(in: .global).midX)

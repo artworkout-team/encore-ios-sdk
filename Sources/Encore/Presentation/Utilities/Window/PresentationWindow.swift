@@ -27,10 +27,19 @@ extension OfferContext.AppearanceMode {
 
 @MainActor
 private final class PresentationHostingController<Content: View>: UIHostingController<Content> {
-    private weak var orientationSource: UIViewController?
+    private let orientationMask: UIInterfaceOrientationMask
+    private let preferredOrientation: UIInterfaceOrientation
+    private let allowsAutorotation: Bool
 
-    init(rootView: Content, orientationSource: UIViewController?) {
-        self.orientationSource = orientationSource
+    init(
+        rootView: Content,
+        orientationMask: UIInterfaceOrientationMask,
+        preferredOrientation: UIInterfaceOrientation,
+        allowsAutorotation: Bool
+    ) {
+        self.orientationMask = orientationMask
+        self.preferredOrientation = preferredOrientation
+        self.allowsAutorotation = allowsAutorotation
         super.init(rootView: rootView)
     }
 
@@ -40,16 +49,15 @@ private final class PresentationHostingController<Content: View>: UIHostingContr
     }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        orientationSource?.supportedInterfaceOrientations ?? super.supportedInterfaceOrientations
+        orientationMask
     }
 
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
-        orientationSource?.preferredInterfaceOrientationForPresentation
-            ?? super.preferredInterfaceOrientationForPresentation
+        preferredOrientation
     }
 
     override var shouldAutorotate: Bool {
-        orientationSource?.shouldAutorotate ?? super.shouldAutorotate
+        allowsAutorotation
     }
 }
 
@@ -119,12 +127,19 @@ enum PresentationWindow {
         newWindow.backgroundColor = .clear
 
         let sourceWindow = windowScene.windows.first(where: \.isKeyWindow)
-        let orientationSource = sourceWindow?.rootViewController
+        let sourceRootViewController = sourceWindow?.rootViewController
+        let orientationMask = UIApplication.shared.delegate?.application?(
+            UIApplication.shared,
+            supportedInterfaceOrientationsFor: sourceWindow
+        ) ?? sourceRootViewController?.supportedInterfaceOrientations ?? .all
+        let preferredOrientation = windowScene.interfaceOrientation
 
         // Create hosting controller
         let hosting = PresentationHostingController(
             rootView: rootView,
-            orientationSource: orientationSource
+            orientationMask: orientationMask,
+            preferredOrientation: preferredOrientation,
+            allowsAutorotation: sourceRootViewController?.shouldAutorotate ?? true
         )
         hosting.modalPresentationStyle = .overFullScreen
         hosting.view.backgroundColor = .clear

@@ -128,10 +128,13 @@ enum PresentationWindow {
 
         let sourceWindow = windowScene.windows.first(where: \.isKeyWindow)
         let sourceRootViewController = sourceWindow?.rootViewController
-        let orientationMask = UIApplication.shared.delegate?.application?(
-            UIApplication.shared,
-            supportedInterfaceOrientationsFor: sourceWindow
-        ) ?? sourceRootViewController?.supportedInterfaceOrientations ?? .all
+        let orientationMask = supportedInterfaceOrientationsFromInfoPlist()
+            ?? UIApplication.shared.delegate?.application?(
+                UIApplication.shared,
+                supportedInterfaceOrientationsFor: sourceWindow
+            )
+            ?? sourceRootViewController?.supportedInterfaceOrientations
+            ?? .all
         let preferredOrientation = windowScene.interfaceOrientation
 
         // Create hosting controller
@@ -165,6 +168,24 @@ enum PresentationWindow {
             newWindow.rootViewController?.present(hosting, animated: true)
         }
         return newWindow
+    }
+
+    private static func supportedInterfaceOrientationsFromInfoPlist() -> UIInterfaceOrientationMask? {
+        let idiomSuffix = UIDevice.current.userInterfaceIdiom == .pad ? "~ipad" : "~iphone"
+        let info = Bundle.main.infoDictionary
+        let orientationNames = info?["UISupportedInterfaceOrientations\(idiomSuffix)"] as? [String]
+            ?? info?["UISupportedInterfaceOrientations"] as? [String]
+        guard let orientationNames, !orientationNames.isEmpty else { return nil }
+
+        return orientationNames.reduce(into: UIInterfaceOrientationMask(rawValue: 0)) { mask, orientationName in
+            switch orientationName {
+            case "UIInterfaceOrientationPortrait": mask.insert(.portrait)
+            case "UIInterfaceOrientationPortraitUpsideDown": mask.insert(.portraitUpsideDown)
+            case "UIInterfaceOrientationLandscapeLeft": mask.insert(.landscapeLeft)
+            case "UIInterfaceOrientationLandscapeRight": mask.insert(.landscapeRight)
+            default: break
+            }
+        }
     }
 
     // MARK: - Cleanup

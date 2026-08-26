@@ -572,11 +572,15 @@ struct SDUIScrollFadeModifier: ViewModifier {
                 centeredOpacity: Double(f.centeredOpacity ?? 1),
                 offCenterOpacity: Double(f.offCenterOpacity ?? 0)
             )
-            content
-                .opacity(op)
-                // Crossfade when the centered card changes (distance flips
-                // between 0 and >=1) instead of snapping.
-                .animation(.easeInOut(duration: 0.25), value: distance)
+            if #available(iOS 18.0, *) {
+                content
+                    .opacity(op)
+                    // Crossfade when the centered card changes (distance flips
+                    // between 0 and >=1) instead of snapping.
+                    .animation(.easeInOut(duration: 0.25), value: distance)
+            } else {
+                content.opacity(op)
+            }
         } else {
             content
         }

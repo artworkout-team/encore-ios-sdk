@@ -119,7 +119,7 @@ enum PresentationWindow {
         newWindow.backgroundColor = .clear
 
         let sourceWindow = windowScene.windows.first(where: \.isKeyWindow)
-        let orientationSource = sourceWindow?.rootViewController.map { topViewController(from: $0) }
+        let orientationSource = sourceWindow?.rootViewController
 
         // Create hosting controller
         let hosting = PresentationHostingController(

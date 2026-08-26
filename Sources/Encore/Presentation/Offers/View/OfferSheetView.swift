@@ -74,20 +74,14 @@ struct OfferSheetView: View {
 
     var body: some View {
         Group {
-            if let loadedConfig = config {
-                sduiContent(loadedConfig)
+            if #available(iOS 18.0, *) {
+                if let loadedConfig = config {
+                    sduiContent(loadedConfig)
+                } else {
+                    fallbackContent
+                }
             } else {
-                FallbackOfferSheetView(
-                    viewModel: viewModel,
-                    preferredColorScheme: preferredColorScheme,
-                    isClaimDisabled: !sduiContext.isClaimEnabled,
-                    onClose: {
-                        viewModel.completionHandler.stageDismissal(.userTappedClose)
-                        onDismiss()
-                    },
-                    onSafariEvent: viewModel.handleSafariTrackingEvent,
-                    onSafariDismiss: viewModel.handleSafariDismiss
-                )
+                fallbackContent
             }
         }
         .overlay {
@@ -164,6 +158,20 @@ struct OfferSheetView: View {
             )
             viewModel.completionHandler.handleOnDisappear()
         }
+    }
+
+    private var fallbackContent: some View {
+        FallbackOfferSheetView(
+            viewModel: viewModel,
+            preferredColorScheme: preferredColorScheme,
+            isClaimDisabled: !sduiContext.isClaimEnabled,
+            onClose: {
+                viewModel.completionHandler.stageDismissal(.userTappedClose)
+                onDismiss()
+            },
+            onSafariEvent: viewModel.handleSafariTrackingEvent,
+            onSafariDismiss: viewModel.handleSafariDismiss
+        )
     }
 
     // MARK: - SDUI Content

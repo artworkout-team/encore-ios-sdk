@@ -155,7 +155,6 @@ private struct ShimmerView: View {
     }
 }
 
-@available(iOS 17.0, *)
 private struct CoreAnimationShimmerView: UIViewRepresentable {
     func makeUIView(context _: Context) -> CoreAnimationShimmerUIView {
         CoreAnimationShimmerUIView()
@@ -164,7 +163,6 @@ private struct CoreAnimationShimmerView: UIViewRepresentable {
     func updateUIView(_: CoreAnimationShimmerUIView, context _: Context) {}
 }
 
-@available(iOS 17.0, *)
 private final class CoreAnimationShimmerUIView: UIView {
     override class var layerClass: AnyClass {
         CAGradientLayer.self

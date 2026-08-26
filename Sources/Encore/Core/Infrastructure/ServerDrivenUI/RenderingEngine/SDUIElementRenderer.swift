@@ -1133,11 +1133,7 @@ private struct SDUIScrollViewRenderer: View {
                 scrollProxy.scrollTo(index, anchor: config.scrollAlignment?.unitPoint)
             }
             .onChange(of: context.focusedIndex) { _, newIndex in
-                animateContextSelection(newIndex, with: scrollProxy)
-            }
-            .transaction { transaction in
-                guard programmaticScrollTarget != nil else { return }
-                transaction.animation = .easeInOut(duration: 0.35)
+                animateContextSelection(newIndex)
             }
         }
     }
@@ -1149,7 +1145,7 @@ private struct SDUIScrollViewRenderer: View {
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(contentMargin, axis: axis)
         .modifier(SDUICarouselPositionModifier(
-            position: carouselPosition,
+            position: carouselPosition.animation(.easeInOut(duration: 0.35)),
             alignment: config.scrollAlignment,
             isEnabled: hasScrollTarget
         ))
@@ -1163,37 +1159,27 @@ private struct SDUIScrollViewRenderer: View {
         Binding(
             get: { scrollPosition },
             set: { newPosition in
-                guard programmaticScrollTarget == nil,
-                      let newPosition,
-                      newPosition != scrollPosition
-                else { return }
+                if let programmaticScrollTarget {
+                    guard newPosition == programmaticScrollTarget else { return }
+                    self.programmaticScrollTarget = nil
+                }
+                guard newPosition != scrollPosition else { return }
                 scrollPosition = newPosition
             }
         )
     }
 
-    private func animateContextSelection(_ newIndex: Int?, with proxy: ScrollViewProxy) {
+    private func animateContextSelection(_ newIndex: Int?) {
         if userDrivenSelection == newIndex {
             return
         }
         guard let newIndex, newIndex != scrollPosition else { return }
-        var setupTransaction = Transaction()
-        setupTransaction.disablesAnimations = true
-        withTransaction(setupTransaction) {
-            programmaticScrollTarget = newIndex
-            scrollPosition = nil
-        }
-
         withAnimation(.easeInOut(duration: 0.35), completionCriteria: .logicallyComplete) {
-            proxy.scrollTo(newIndex, anchor: config.scrollAlignment?.unitPoint)
+            programmaticScrollTarget = newIndex
+            scrollPosition = newIndex
         } completion: {
             guard programmaticScrollTarget == newIndex else { return }
-            var completionTransaction = Transaction()
-            completionTransaction.disablesAnimations = true
-            withTransaction(completionTransaction) {
-                programmaticScrollTarget = nil
-                scrollPosition = newIndex
-            }
+            programmaticScrollTarget = nil
         }
     }
 

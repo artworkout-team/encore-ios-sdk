@@ -1093,7 +1093,14 @@ private struct SDUIScrollViewRenderer: View {
         Binding(
             get: { scrollPosition },
             set: { newPosition in
-                guard programmaticScrollTarget == nil else { return }
+                // iOS 17 reports `nil` while scroll targets are unresolved
+                // during layout. Publishing that transient value back into
+                // local state invalidates the hierarchy and can trap the sheet
+                // in a render loop before its scene finishes activating.
+                guard programmaticScrollTarget == nil,
+                      let newPosition,
+                      newPosition != scrollPosition
+                else { return }
                 scrollPosition = newPosition
             }
         )

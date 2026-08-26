@@ -28,7 +28,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
     /// in the active window). A failed load — placeholder branch — never
     /// fires this, so a creative that didn't render isn't recorded as a
     /// viewable. Stateless; callers dedupe at a higher layer if needed.
-    var onLoadedVisible: (() -> Void)? = nil
+    var onLoadedVisible: (() -> Void)?
 
     @State private var image: UIImage?
     @State private var isLoading = false
@@ -130,22 +130,88 @@ private struct ShimmerView: View {
     @State private var phase: CGFloat = -1
 
     var body: some View {
-        GeometryReader { geo in
-            LinearGradient(
-                colors: [
-                    Color(UIColor.systemFill).opacity(0),
-                    Color(UIColor.systemFill).opacity(0.3),
-                    Color(UIColor.systemFill).opacity(0)
-                ],
-                startPoint: .init(x: phase, y: 0.5),
-                endPoint: .init(x: phase + 0.7, y: 0.5)
-            )
-            .onAppear {
-                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                    phase = 2
+        if #available(iOS 18.0, *) {
+            GeometryReader { _ in
+                LinearGradient(
+                    colors: [
+                        Color(UIColor.systemFill).opacity(0),
+                        Color(UIColor.systemFill).opacity(0.3),
+                        Color(UIColor.systemFill).opacity(0),
+                    ],
+                    startPoint: .init(x: phase, y: 0.5),
+                    endPoint: .init(x: phase + 0.7, y: 0.5)
+                )
+                .onAppear {
+                    withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                        phase = 2
+                    }
                 }
             }
+            .allowsHitTesting(false)
+        } else {
+            CoreAnimationShimmerView()
+                .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
+    }
+}
+
+@available(iOS 17.0, *)
+private struct CoreAnimationShimmerView: UIViewRepresentable {
+    func makeUIView(context _: Context) -> CoreAnimationShimmerUIView {
+        CoreAnimationShimmerUIView()
+    }
+
+    func updateUIView(_: CoreAnimationShimmerUIView, context _: Context) {}
+}
+
+@available(iOS 17.0, *)
+private final class CoreAnimationShimmerUIView: UIView {
+    override class var layerClass: AnyClass {
+        CAGradientLayer.self
+    }
+
+    private var gradientLayer: CAGradientLayer {
+        layer as! CAGradientLayer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        gradientLayer.locations = [-1, -0.65, -0.3]
+        updateColors()
+
+        let animation = CABasicAnimation(keyPath: "locations")
+        animation.fromValue = [-1, -0.65, -0.3]
+        animation.toValue = [1.3, 1.65, 2]
+        animation.duration = 1.2
+        animation.repeatCount = .infinity
+        gradientLayer.add(animation, forKey: "encore.shimmer")
+    }
+
+    private func updateColors() {
+        let fill = UIColor.systemFill.resolvedColor(with: traitCollection)
+        gradientLayer.colors = [
+            fill.withAlphaComponent(0).cgColor,
+            fill.withAlphaComponent(0.3).cgColor,
+            fill.withAlphaComponent(0).cgColor,
+        ]
+    }
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        guard previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle else { return }
+        updateColors()
     }
 }

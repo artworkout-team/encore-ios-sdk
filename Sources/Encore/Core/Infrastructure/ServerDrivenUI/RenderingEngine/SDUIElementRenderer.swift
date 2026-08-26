@@ -798,22 +798,24 @@ struct SDUIElementRenderer: View {
     /// Authors can override sizing via `style.frame`.
     @ViewBuilder
     private func renderConfetti(_ config: SDUIConfetti) -> some View {
-        let colors: [UIColor] = (config.colors ?? [])
-            .filter { !$0.isEmpty }
-            .map { UIColor(Color(hex: $0)) }
+        if #available(iOS 18.0, *) {
+            let colors: [UIColor] = (config.colors ?? [])
+                .filter { !$0.isEmpty }
+                .map { UIColor(Color(hex: $0)) }
 
-        ConfettiView(
-            colors: colors,
-            intensity: config.intensity ?? 20,
-            duration: config.duration ?? 2.5,
-            originY: config.originY ?? 0,
-            originX: config.originX,
-            scatter: config.scatter ?? 0,
-            scatterHeight: config.scatterHeight ?? 0.45
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
-        .modifier(SDUIStyleModifier(style: config.style))
+            ConfettiView(
+                colors: colors,
+                intensity: config.intensity ?? 20,
+                duration: config.duration ?? 2.5,
+                originY: config.originY ?? 0,
+                originX: config.originX,
+                scatter: config.scatter ?? 0,
+                scatterHeight: config.scatterHeight ?? 0.45
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .modifier(SDUIStyleModifier(style: config.style))
+        }
     }
 
     // MARK: - Conditional Renderer

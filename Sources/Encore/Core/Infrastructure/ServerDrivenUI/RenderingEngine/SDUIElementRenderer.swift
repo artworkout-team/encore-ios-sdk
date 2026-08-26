@@ -469,32 +469,34 @@ struct SDUIElementRenderer: View {
 
     // MARK: - Button Renderer
 
+    @ViewBuilder
     private func renderButton(_ config: SDUIButton) -> some View {
         let isClaimDisabled = config.action.type == .claimOffer && !context.isClaimEnabled
         let isDisabled = (config.disabled ?? false) || isClaimDisabled
 
-        // Render as a real `Button` rather than `.onTapGesture`. Inside a
-        // horizontal carousel `ScrollView(.scrollClipDisabled(true))`, each
-        // full-width `containerRelativeFrame` card's un-clipped frame bleeds
-        // across the viewport; an `.onTapGesture` hit region is not bounded to
-        // the clipped/on-screen area and does not arbitrate with the scroll
-        // gesture, so taps on non-leading cards get swallowed by an off-screen
-        // sibling. A `Button` bounds hit-testing to the rendered region and
-        // coordinates with the scroll gesture. This also matches `renderToggle`.
-        return Button {
+        // Keep every action as a real `Button` for disabled and accessibility
+        // semantics. Carousel selection buttons receive a primitive style
+        // below because iOS 17's target-aligned ScrollView cancels the standard
+        // plain-button gesture before it reaches the action.
+        let button = Button {
             handleAction(config.action)
         } label: {
             SDUIElementRenderer(element: config.content, context: context, offer: offer)
                 .modifier(SDUIStyleModifier(style: config.style))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .disabled(isDisabled)
         .opacity(isClaimDisabled ? 0.4 : 1.0)
         // Per-card UI-test hook: every claim button (one per carousel card)
         // carries this id so XCUITest can target a specific card's CTA and
         // assert non-leading cards are tappable (regression guard for #2).
         .accessibilityIdentifier(config.action.type == .claimOffer ? "encore_claim_offer_button" : "")
+
+        if config.action.type == .selectOffer {
+            button.buttonStyle(SDUICarouselButtonStyle())
+        } else {
+            button.buttonStyle(.plain)
+        }
     }
 
     /// Handle button actions - state machine actions are handled internally, others are delegated
@@ -956,6 +958,24 @@ struct SDUIElementRenderer: View {
         SDUISlideButtonView(config: config, onComplete: {
             handleAction(config.action)
         }, context: context)
+    }
+}
+
+// MARK: - Carousel Button Style
+
+/// Keeps offer cards as semantic `Button`s while giving their primary action a
+/// tap recognizer that can coexist with an iOS 17 target-aligned ScrollView.
+/// The standard plain button gesture is cancelled by that scroll view before
+/// it reaches `trigger()`; a primitive style owns the tap without taking over a
+/// drag, so swipes continue to belong to the carousel.
+@available(iOS 17.0, *)
+private struct SDUICarouselButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .onTapGesture {
+                configuration.trigger()
+            }
     }
 }
 

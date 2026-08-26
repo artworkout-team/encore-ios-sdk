@@ -74,12 +74,8 @@ struct OfferSheetView: View {
 
     var body: some View {
         Group {
-            if #available(iOS 18.0, *) {
-                if let loadedConfig = config {
-                    sduiContent(loadedConfig)
-                } else {
-                    fallbackContent
-                }
+            if #available(iOS 17.0, *), let loadedConfig = config {
+                sduiContent(loadedConfig)
             } else {
                 fallbackContent
             }
@@ -97,17 +93,6 @@ struct OfferSheetView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.verificationState != .idle)
-        .transaction { transaction in
-            // iOS 17 drives every active SDUI animation through root view
-            // invalidation. A screen with several repeat-forever effects can
-            // otherwise saturate the main thread before scene activation
-            // completes. iOS 18+ does not exhibit this behavior, so preserve
-            // its normal descendant animations.
-            guard #unavailable(iOS 18.0),
-                  viewModel.verificationState == .idle
-            else { return }
-            transaction.animation = nil
-        }
         .onAppear {
             setupContext()
 
@@ -134,7 +119,8 @@ struct OfferSheetView: View {
 
             // Prefill email from developer-provided user attributes if not already set
             if sduiContext.values["email"]?.isEmpty != false,
-               let email = entitlementsManager?.userAttributes.email, !email.isEmpty {
+               let email = entitlementsManager?.userAttributes.email, !email.isEmpty
+            {
                 sduiContext.values["email"] = email
             }
 
@@ -177,7 +163,6 @@ struct OfferSheetView: View {
     // MARK: - SDUI Content
 
     @available(iOS 17.0, *)
-    @ViewBuilder
     private func sduiContent(_ loadedConfig: SDUIConfig) -> some View {
         ZStack(alignment: .top) {
             SDUIElementRenderer(element: loadedConfig.root, context: sduiContext)
@@ -299,7 +284,7 @@ private extension View {
     @ViewBuilder
     func applyCornerRadius(_ radius: CGFloat?) -> some View {
         if let radius = radius {
-            self.presentationCornerRadius(radius)
+            presentationCornerRadius(radius)
         } else {
             self
         }

@@ -1174,7 +1174,6 @@ private struct SDUIScrollViewRenderer: View {
 
     private func animateContextSelection(_ newIndex: Int?, with proxy: ScrollViewProxy) {
         if userDrivenSelection == newIndex {
-            userDrivenSelection = nil
             return
         }
         guard let newIndex, newIndex != scrollPosition else { return }
@@ -1200,6 +1199,7 @@ private struct SDUIScrollViewRenderer: View {
 
     private func updateVisibleOffer(from offerCenters: [Int: CGFloat], viewportCenter: CGFloat) {
         guard programmaticScrollTarget == nil,
+              context.currentIndex == scrollPosition || userDrivenSelection != nil,
               let visibleOffer = offerCenters.min(by: {
                   abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
               }),
@@ -1213,6 +1213,9 @@ private struct SDUIScrollViewRenderer: View {
     }
 
     private func commitScrolledPosition(_ newIndex: Int?) {
+        if userDrivenSelection == newIndex {
+            userDrivenSelection = nil
+        }
         guard let newIndex, newIndex != context.currentIndex else { return }
         let requestedIndex = context.focusedIndex
         context.currentIndex = newIndex

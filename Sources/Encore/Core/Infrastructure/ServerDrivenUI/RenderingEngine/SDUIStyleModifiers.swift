@@ -22,7 +22,6 @@ struct SDUIStyleModifier: ViewModifier {
             .modifier(SDUIFrameModifier(frame: style?.frame))
             .modifier(SDUIFixedSizeModifier(fixedSize: style?.fixedSize))
             .modifier(SDUIClippedModifier(clipped: style?.clipped))
-            .modifier(SDUIBackgroundElementModifier(element: style?.backgroundElement))
             // Fill + corner-radius clip + shadow composed together so the drop
             // shadow is cast by the filled rounded SHAPE (behind the content,
             // outside the clip) and never clipped into a hard rectangle.
@@ -37,7 +36,6 @@ struct SDUIStyleModifier: ViewModifier {
             .modifier(SDUIInnerShadowModifier(innerShadow: style?.innerShadow, cornerRadius: style?.resolvedCornerRadius ?? 0))
             .modifier(SDUIOpacityModifier(opacity: style?.opacity))
             .modifier(SDUIClipShapeModifier(clipShape: style?.clipShape))
-            .modifier(SDUIOverlayElementModifier(element: style?.overlay))
             .modifier(SDUISafeAreaModifier(ignoresSafeArea: style?.ignoresSafeArea))
             .modifier(SDUILayoutPriorityModifier(priority: style?.layoutPriority))
             // Transforms applied last — after frame/background/overlay resolve —
@@ -599,43 +597,6 @@ struct SDUIScrollFadeModifier: ViewModifier {
     ) -> Double {
         let mag = min(1, max(0, abs(distance)))
         return centeredOpacity + (offCenterOpacity - centeredOpacity) * mag
-    }
-}
-
-/// Layers an SDUI sub-element ABOVE the content. Renders through
-/// `SDUIElementRenderer` using the context + row offer from the environment.
-@available(iOS 17.0, *)
-struct SDUIOverlayElementModifier: ViewModifier {
-    let element: SDUIElement?
-    @Environment(\.sduiRenderEnvironment) private var renderEnv
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let element = element, let context = renderEnv.context {
-            content.overlay(
-                SDUIElementRenderer(element: element, context: context, offer: renderEnv.offer)
-            )
-        } else {
-            content
-        }
-    }
-}
-
-/// Layers an SDUI sub-element BEHIND the content.
-@available(iOS 17.0, *)
-struct SDUIBackgroundElementModifier: ViewModifier {
-    let element: SDUIElement?
-    @Environment(\.sduiRenderEnvironment) private var renderEnv
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let element = element, let context = renderEnv.context {
-            content.background(
-                SDUIElementRenderer(element: element, context: context, offer: renderEnv.offer)
-            )
-        } else {
-            content
-        }
     }
 }
 

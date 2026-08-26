@@ -16,35 +16,51 @@ struct SDUIElementRenderer: View {
     @ObservedObject var context: SDUIContext
     var offer: Offer? = nil
     var isCurrentPage: Bool = false
-    @State private var renderEnvironment: SDUIRenderEnvironment
 
     /// Observed so the tree re-renders when a logo's dominant color is
     /// extracted asynchronously, letting `{"binding": "offerDominantColor"}`
     /// update from the neutral fallback to the real brand color.
     @ObservedObject private var dominantColors = DominantColorStore.shared
 
-    init(
-        element: SDUIElement,
-        context: SDUIContext,
-        offer: Offer? = nil,
-        isCurrentPage: Bool = false
-    ) {
-        self.element = element
-        self._context = ObservedObject(wrappedValue: context)
-        self.offer = offer
-        self.isCurrentPage = isCurrentPage
-        self._renderEnvironment = State(initialValue: SDUIRenderEnvironment(context: context, offer: offer))
-    }
-
     var body: some View {
         renderElement(element)
+            .background {
+                if let backgroundElement = elementStyle?.backgroundElement {
+                    SDUIElementRenderer(element: backgroundElement, context: context, offer: offer)
+                }
+            }
+            .overlay {
+                if let overlayElement = elementStyle?.overlay {
+                    SDUIElementRenderer(element: overlayElement, context: context, offer: offer)
+                }
+            }
             // Publish the row-scoped color binding values so generic
             // ViewModifiers (border, gradientBorder, background) that have no
             // SDUIContext can still resolve `{"binding": "..."}` colors.
             .environment(\.sduiColorValues, colorValues)
-            // Publish context + row offer so generic modifiers can render
-            // sub-elements (style.overlay / style.backgroundElement).
-            .environment(\.sduiRenderEnvironment, renderEnvironment)
+    }
+
+    private var elementStyle: SDUIStyle? {
+        switch element {
+        case .text(let config): config.style
+        case .systemImage(let config): config.style
+        case .asyncImage(let config): config.style
+        case .asyncVideo(let config): config.style
+        case .appIcon(let config): config.style
+        case .button(let config): config.style
+        case .vStack(let config), .hStack(let config), .zStack(let config): config.style
+        case .spacer(let config): config.style
+        case .shape(let config): config.style
+        case .gradient(let config): config.style
+        case .scrollView(let config): config.style
+        case .forEach(let config): config.style
+        case .group(let config): config.style
+        case .textField(let config): config.style
+        case .toggle(let config): config.style
+        case .slideButton(let config): config.style
+        case .confetti(let config): config.style
+        case .conditional, .compactPageIndicator, .empty: nil
+        }
     }
 
     /// Per-render color binding values: the current row offer's dominant color

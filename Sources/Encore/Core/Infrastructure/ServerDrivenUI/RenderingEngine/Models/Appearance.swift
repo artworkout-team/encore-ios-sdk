@@ -218,38 +218,6 @@ extension EnvironmentValues {
     }
 }
 
-/// SwiftUI environment carrying the active render `SDUIContext` and the
-/// current row `Offer`, so generic `ViewModifier`s can render sub-elements
-/// (`style.overlay`, `style.backgroundElement`) through `SDUIElementRenderer`.
-/// Set per element in the renderer's `body`.
-@available(iOS 17.0, *)
-final class SDUIRenderEnvironment: Equatable {
-    weak var context: SDUIContext?
-    let offer: Offer?
-
-    init(context: SDUIContext? = nil, offer: Offer? = nil) {
-        self.context = context
-        self.offer = offer
-    }
-
-    static func == (lhs: SDUIRenderEnvironment, rhs: SDUIRenderEnvironment) -> Bool {
-        lhs === rhs
-    }
-}
-
-@available(iOS 17.0, *)
-private struct SDUIRenderEnvironmentKey: EnvironmentKey {
-    static let defaultValue = SDUIRenderEnvironment()
-}
-
-@available(iOS 17.0, *)
-extension EnvironmentValues {
-    var sduiRenderEnvironment: SDUIRenderEnvironment {
-        get { self[SDUIRenderEnvironmentKey.self] }
-        set { self[SDUIRenderEnvironmentKey.self] = newValue }
-    }
-}
-
 /// How far the enclosing carousel card is from the centered card, as an integer
 /// distance (`abs(index - currentIndex)`). Set per card in `renderForEach` so
 /// descendant `scrollFade` layers (brand-color fill, checkmark badge) know

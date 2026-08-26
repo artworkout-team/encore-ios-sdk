@@ -50,7 +50,6 @@ struct OfferSheetContainer: View {
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
     
     @State private var presentationState: PresentationState? = .offers
-    @Environment(\.dismiss) var dismiss
     
     /// Presentation style from cached server config, resolved for this
     /// presentation's use case.
@@ -94,6 +93,9 @@ struct OfferSheetContainer: View {
                 offerContext: offerContext,
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
+                onDismiss: {
+                    presentationState = nil
+                },
                 onCompletion: { result in
                     handleOfferSheetCompletion(result)
                 }
@@ -123,11 +125,10 @@ struct OfferSheetContainer: View {
     
     private func handleOfferSheetCompletion(_ result: Result<PresentationResult, EncoreError>) {
         onCompletion(result)
-        dismiss()
     }
     
     private func handleCreditClaimedDismiss(result: Result<PresentationResult, EncoreError>) {
-        dismiss()
+        presentationState = nil
     }
 }
 

@@ -14,7 +14,6 @@ import SwiftUI
 struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
-    @Environment(\.dismiss) var dismiss
 
     /// SDUI config from SDUIConfigurationManager, resolved for this
     /// presentation's use case (pre-fetched on identify for `.reduceChurn`, lazily
@@ -36,6 +35,7 @@ struct OfferSheetView: View {
     }
 
     private let initialStateOverride: String?
+    private let onDismiss: () -> Void
 
     init(
         offerResponse: OfferResponse,
@@ -46,9 +46,11 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
+        onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
+        self.onDismiss = onDismiss
 
         let handler = SheetDismissHandler(onCompletion: onCompletion, initiallyPurchased: initiallyPurchased)
         _viewModel = StateObject(wrappedValue: OfferSheetViewModel(
@@ -81,7 +83,7 @@ struct OfferSheetView: View {
                     isClaimDisabled: !sduiContext.isClaimEnabled,
                     onClose: {
                         viewModel.completionHandler.stageDismissal(.userTappedClose)
-                        dismiss()
+                        onDismiss()
                     },
                     onSafariEvent: viewModel.handleSafariTrackingEvent,
                     onSafariDismiss: viewModel.handleSafariDismiss
@@ -215,7 +217,7 @@ struct OfferSheetView: View {
 
     private func setupContext() {
         sduiContext.isClaimEnabled = Encore.shared.isClaimEnabled
-        viewModel.bind(sduiContext: sduiContext, dismiss: dismiss)
+        viewModel.bind(sduiContext: sduiContext, onDismiss: onDismiss)
         sduiContext.onAction = { [weak viewModel] action, offer in
             viewModel?.handleSDUIAction(action, offer: offer)
         }

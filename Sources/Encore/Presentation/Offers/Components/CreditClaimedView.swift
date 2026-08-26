@@ -11,8 +11,6 @@ struct CreditClaimedView: View {
     let offerContext: OfferContext
     let onDismiss: () -> Void
     
-    @Environment(\.dismiss) var dismiss
-    
     /// Primary text color that adapts to system appearance
     private let primaryTextColor = Color(UIColor.label)
     
@@ -55,7 +53,7 @@ struct CreditClaimedView: View {
                 Spacer()
                 
                 Button {
-                    dismiss()
+                    onDismiss()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 14))
@@ -106,4 +104,3 @@ struct CreditClaimedView: View {
         }
     }
 }
-

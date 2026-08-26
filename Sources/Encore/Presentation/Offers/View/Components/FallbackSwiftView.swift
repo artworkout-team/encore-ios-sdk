@@ -240,13 +240,81 @@ struct CarouselView: View {
     let onOfferTap: @MainActor (Offer) -> Void
 
     var body: some View {
-        TabOfferPager(
-            offers: offers,
-            currentIndex: $currentIndex,
-            offerContext: offerContext,
-            isClaimDisabled: isClaimDisabled,
-            onOfferTap: onOfferTap
-        )
+        if #available(iOS 17.0, *) {
+            ScrollOfferPager(
+                offers: offers,
+                currentIndex: $currentIndex,
+                offerContext: offerContext,
+                isClaimDisabled: isClaimDisabled,
+                onOfferTap: onOfferTap
+            )
+        } else {
+            TabOfferPager(
+                offers: offers,
+                currentIndex: $currentIndex,
+                offerContext: offerContext,
+                isClaimDisabled: isClaimDisabled,
+                onOfferTap: onOfferTap
+            )
+        }
+    }
+}
+
+@available(iOS 17.0, *)
+private struct ScrollOfferPager: View {
+    let offers: [Offer]
+    @Binding var currentIndex: Int?
+    let offerContext: OfferContext
+    let isClaimDisabled: Bool
+    let onOfferTap: @MainActor (Offer) -> Void
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
+                        OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
+                            onOfferTap(offer)
+                        }
+                        .padding(.horizontal, OfferSheetStyles.carouselMargin)
+                        .frame(width: geometry.size.width)
+                        .background {
+                            GeometryReader { pageGeometry in
+                                Color.clear.preference(
+                                    key: OfferPageCenterPreferenceKey.self,
+                                    value: [index: pageGeometry.frame(in: .global).midX]
+                                )
+                            }
+                        }
+                        .id(index)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollPosition(id: $currentIndex.animation(.default))
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .onPreferenceChange(OfferPageCenterPreferenceKey.self) { pageCenters in
+                updateSettledPage(from: pageCenters, viewportCenter: geometry.frame(in: .global).midX)
+            }
+        }
+    }
+
+    private func updateSettledPage(from pageCenters: [Int: CGFloat], viewportCenter: CGFloat) {
+        guard let centeredPage = pageCenters.min(by: {
+            abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
+        }),
+              abs(centeredPage.value - viewportCenter) < 1,
+              centeredPage.key != currentIndex
+        else { return }
+        currentIndex = centeredPage.key
+    }
+}
+
+private struct OfferPageCenterPreferenceKey: PreferenceKey {
+    static let defaultValue: [Int: CGFloat] = [:]
+
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
     }
 }
 

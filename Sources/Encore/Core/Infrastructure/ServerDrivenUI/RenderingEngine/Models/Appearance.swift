@@ -232,7 +232,7 @@ final class SDUIRenderEnvironment: Equatable {
         self.offer = offer
     }
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
+    static func == (lhs: SDUIRenderEnvironment, rhs: SDUIRenderEnvironment) -> Bool {
         lhs === rhs
     }
 }

@@ -35,6 +35,11 @@ internal enum PresentationWindow {
     
     /// The hosting controller for the presented SwiftUI view.
     private static var hostingController: UIViewController?
+
+    /// iOS 17 requires the overlay to become key before presenting SwiftUI
+    /// content from its root controller. Weak so the SDK never extends the
+    /// host window's lifetime.
+    private static weak var previousKeyWindow: UIWindow?
     
     /// Called when the window is dismissed (cleanup, swipe-away, etc.)
     private static var onDismissHandler: (() -> Void)?
@@ -80,10 +85,16 @@ internal enum PresentationWindow {
         // and ignore the SwiftUI environment — so an explicit `appearance_mode`
         // had no effect inside a host that pins its own style.
         newWindow.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        newWindow.frame = windowScene.coordinateSpace.bounds
         newWindow.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1000)
         newWindow.backgroundColor = .clear
         newWindow.rootViewController = UIViewController()
-        newWindow.isHidden = false
+        if #available(iOS 18.0, *) {
+            newWindow.isHidden = false
+        } else {
+            previousKeyWindow = windowScene.windows.first(where: \.isKeyWindow)
+            newWindow.makeKeyAndVisible()
+        }
         
         // Create hosting controller
         let hosting = UIHostingController(rootView: rootView)
@@ -104,13 +115,17 @@ internal enum PresentationWindow {
     /// Cleans up the presentation window after dismissal.
     static func cleanup() {
         let handler = onDismissHandler
+        let keyWindowToRestore = previousKeyWindow
         
         hostingController?.dismiss(animated: false)
         hostingController = nil
+        window?.resignKey()
         window?.isHidden = true
         window?.rootViewController = nil
         window = nil
+        previousKeyWindow = nil
         onDismissHandler = nil
+        keyWindowToRestore?.makeKey()
         
         // Fire handler after clearing state to prevent re-entrancy issues
         handler?()

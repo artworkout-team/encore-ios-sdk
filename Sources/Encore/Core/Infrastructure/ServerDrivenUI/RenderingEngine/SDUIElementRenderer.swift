@@ -1237,7 +1237,7 @@ private struct SDUICarouselPositionModifier: ViewModifier {
     let isEnabled: Bool
 
     func body(content: Content) -> some View {
-        if isEnabled {
+        if #available(iOS 18.0, *), isEnabled {
             content.scrollPosition(id: $position, anchor: alignment?.unitPoint)
         } else {
             content

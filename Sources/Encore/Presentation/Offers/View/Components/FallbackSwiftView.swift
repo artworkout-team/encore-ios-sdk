@@ -240,101 +240,13 @@ struct CarouselView: View {
     let onOfferTap: @MainActor (Offer) -> Void
 
     var body: some View {
-        if #available(iOS 17.0, *) {
-            ScrollOfferPager(
-                offers: offers,
-                currentIndex: $currentIndex,
-                offerContext: offerContext,
-                isClaimDisabled: isClaimDisabled,
-                onOfferTap: onOfferTap
-            )
-        } else {
-            TabOfferPager(
-                offers: offers,
-                currentIndex: $currentIndex,
-                offerContext: offerContext,
-                isClaimDisabled: isClaimDisabled,
-                onOfferTap: onOfferTap
-            )
-        }
-    }
-}
-
-@available(iOS 17.0, *)
-private struct ScrollOfferPager: View {
-    let offers: [Offer]
-    @Binding var currentIndex: Int?
-    let offerContext: OfferContext
-    let isClaimDisabled: Bool
-    let onOfferTap: @MainActor (Offer) -> Void
-
-    @State private var scrollPosition: Int?
-
-    init(
-        offers: [Offer],
-        currentIndex: Binding<Int?>,
-        offerContext: OfferContext,
-        isClaimDisabled: Bool,
-        onOfferTap: @escaping @MainActor (Offer) -> Void
-    ) {
-        self.offers = offers
-        _currentIndex = currentIndex
-        self.offerContext = offerContext
-        self.isClaimDisabled = isClaimDisabled
-        self.onOfferTap = onOfferTap
-        _scrollPosition = State(initialValue: currentIndex.wrappedValue)
-    }
-
-    var body: some View {
-        GeometryReader { viewportProxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: OfferSheetStyles.carouselSpacing) {
-                    ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
-                        OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
-                            onOfferTap(offer)
-                        }
-                        .containerRelativeFrame(.horizontal)
-                        .background {
-                            GeometryReader { cardProxy in
-                                Color.clear.preference(
-                                    key: OfferCardCenterPreferenceKey.self,
-                                    value: [index: cardProxy.frame(in: .global).midX]
-                                )
-                            }
-                        }
-                        .id(index)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $scrollPosition, anchor: .center)
-            .contentMargins(.horizontal, OfferSheetStyles.carouselMargin, for: .scrollContent)
-            .onPreferenceChange(OfferCardCenterPreferenceKey.self) { centers in
-                updateCurrentIndex(
-                    from: centers,
-                    viewportCenter: viewportProxy.frame(in: .global).midX
-                )
-            }
-        }
-    }
-
-    private func updateCurrentIndex(from centers: [Int: CGFloat], viewportCenter: CGFloat) {
-        guard centers.count == offers.count,
-              let focusedIndex = centers.min(by: {
-                  abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
-              })?.key,
-              focusedIndex != currentIndex
-        else { return }
-        currentIndex = focusedIndex
-    }
-}
-
-private struct OfferCardCenterPreferenceKey: PreferenceKey {
-    static let defaultValue: [Int: CGFloat] = [:]
-
-    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+        TabOfferPager(
+            offers: offers,
+            currentIndex: $currentIndex,
+            offerContext: offerContext,
+            isClaimDisabled: isClaimDisabled,
+            onOfferTap: onOfferTap
+        )
     }
 }
 

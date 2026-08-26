@@ -768,6 +768,7 @@ struct SDUIElementRenderer: View {
                         key: SDUIOfferCenterPreferenceKey.self,
                         value: [index: geometryProxy.frame(in: .global).midX]
                     )
+                    .allowsHitTesting(false)
                 }
             }
             .id(index)

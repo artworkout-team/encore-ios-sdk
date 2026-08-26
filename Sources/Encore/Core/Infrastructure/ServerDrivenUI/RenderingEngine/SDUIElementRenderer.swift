@@ -1040,147 +1040,52 @@ private struct SDUISemanticScrollViewRenderer: View {
     }
 }
 
-/// Renders an SDUI scroll view while adapting centered carousels to the actual
-/// viewport. A centered fixed-width carousel needs enough leading/trailing
-/// content margin to place its first and last cards at the viewport center.
-/// The margin is derived synchronously from the GeometryReader proposal, so the
-/// ScrollView keeps its full-width hit region without publishing layout state.
+/// iOS 17 scroll path. Keep the scroll position bound directly to the semantic
+/// context, matching Encore 2.0.2. The iOS 18 renderer above owns the newer
+/// `ScrollPosition`-based programmatic animation path.
 @available(iOS 17.0, *)
 private struct SDUIScrollViewRenderer: View {
     let config: SDUIScrollView
     @ObservedObject var context: SDUIContext
     let offer: Offer?
 
-    @State private var scrollPosition: Int?
-    @State private var programmaticScrollTarget: Int?
-
     private var axis: Axis.Set { config.axis?.axis ?? .vertical }
     private var scrollAxis: SDUIScrollAxis { config.axis ?? .vertical }
     private var hasScrollTarget: Bool { SDUIElementRenderer.tracksCarouselPosition(config) }
-
-    init(config: SDUIScrollView, context: SDUIContext, offer: Offer?) {
-        self.config = config
-        self.context = context
-        self.offer = offer
-        _scrollPosition = State(initialValue: context.focusedIndex)
-        _programmaticScrollTarget = State(initialValue: nil)
-    }
 
     private var resolvedContentMargin: CGFloat? {
         guard let margins = config.contentMargins else { return nil }
         return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
     }
 
-    private var usesCenteredGeometry: Bool {
-        axis == .horizontal
-            && config.scrollAlignment == .center
-            && SDUIScrollLayout.offerItemWidth(for: config) != nil
-    }
-
-    @ViewBuilder
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            Group {
-                if usesCenteredGeometry {
-                    GeometryReader { geometryProxy in
-                        scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
-                            for: config,
-                            viewportWidth: geometryProxy.size.width
-                        ))
-                    }
-                    .modifier(SDUIStyleModifier(style: config.style))
-                } else {
-                    scrollView(contentMargin: resolvedContentMargin)
-                        .modifier(SDUIStyleModifier(style: config.style))
-                }
-            }
-            .onAppear {
-                guard let index = context.focusedIndex else { return }
-                scrollProxy.scrollTo(index, anchor: config.scrollAlignment?.unitPoint)
-            }
-            .onChange(of: context.focusedIndex) { _, newIndex in
-                animateContextSelection(newIndex, with: scrollProxy)
-            }
-            .transaction { transaction in
-                // OfferSheetView suppresses steady-state descendant animations
-                // on iOS 17 to avoid a render loop. A programmatic card change
-                // is bounded, so explicitly opt this subtree back into the
-                // scroll animation while its target is active.
-                guard programmaticScrollTarget != nil else { return }
-                transaction.animation = .easeInOut(duration: 0.35)
-            }
-        }
-    }
-
-    private func scrollView(contentMargin: CGFloat?) -> some View {
         ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
             SDUIElementRenderer(element: config.content, context: context, offer: offer)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyContentMargin(contentMargin, axis: axis)
+        .applyContentMargin(resolvedContentMargin, axis: axis)
         .modifier(SDUICarouselPositionModifier(
             position: carouselPosition,
             alignment: config.scrollAlignment,
             isEnabled: hasScrollTarget
         ))
         .scrollClipDisabled(true)
-        .onChange(of: scrollPosition) { _, newIndex in
-            commitScrolledPosition(newIndex)
-        }
+        .modifier(SDUIStyleModifier(style: config.style))
     }
 
     private var carouselPosition: Binding<Int?> {
         Binding(
-            get: { scrollPosition },
-            set: { newPosition in
-                // iOS 17 reports `nil` while scroll targets are unresolved
-                // during layout. Publishing that transient value back into
-                // local state invalidates the hierarchy and can trap the sheet
-                // in a render loop before its scene finishes activating.
-                guard programmaticScrollTarget == nil,
-                      let newPosition,
-                      newPosition != scrollPosition
-                else { return }
-                scrollPosition = newPosition
+            get: { context.focusedIndex },
+            set: { newIndex in
+                guard let newIndex, newIndex != context.currentIndex else { return }
+                let requestedIndex = context.focusedIndex
+                context.currentIndex = newIndex
+                context.selectCenteredOffer(at: newIndex)
+                if newIndex != requestedIndex {
+                    context.trackScroll(axis: scrollAxis, position: newIndex)
+                }
             }
         )
-    }
-
-    private func animateContextSelection(_ newIndex: Int?, with proxy: ScrollViewProxy) {
-        guard let newIndex, newIndex != scrollPosition else { return }
-        var setupTransaction = Transaction()
-        setupTransaction.disablesAnimations = true
-        withTransaction(setupTransaction) {
-            programmaticScrollTarget = newIndex
-            scrollPosition = nil
-        }
-
-        withAnimation(.easeInOut(duration: 0.35), completionCriteria: .logicallyComplete) {
-            proxy.scrollTo(newIndex, anchor: config.scrollAlignment?.unitPoint)
-        } completion: {
-            guard programmaticScrollTarget == newIndex else { return }
-            var completionTransaction = Transaction()
-            completionTransaction.disablesAnimations = true
-            withTransaction(completionTransaction) {
-                programmaticScrollTarget = nil
-                scrollPosition = newIndex
-            }
-        }
-    }
-
-    private func commitScrolledPosition(_ newIndex: Int?) {
-        // A `nil` write means "no resolvable scroll target" during layout or
-        // teardown. It never means the user deselected the current offer.
-        guard let newIndex, newIndex != context.currentIndex else { return }
-        let requestedIndex = context.focusedIndex
-        context.currentIndex = newIndex
-        context.selectCenteredOffer(at: newIndex)
-
-        // A context-driven tap sets `currentIndex` before moving the local
-        // scroll position, so only a finger-driven settle reaches this branch.
-        if newIndex != requestedIndex {
-            context.trackScroll(axis: scrollAxis, position: newIndex)
-        }
     }
 }
 
@@ -1237,7 +1142,7 @@ private struct SDUICarouselPositionModifier: ViewModifier {
     let isEnabled: Bool
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *), isEnabled {
+        if isEnabled {
             content.scrollPosition(id: $position, anchor: alignment?.unitPoint)
         } else {
             content

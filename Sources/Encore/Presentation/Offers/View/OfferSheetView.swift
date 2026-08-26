@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Main Sheet View
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
@@ -176,6 +176,7 @@ struct OfferSheetView: View {
 
     // MARK: - SDUI Content
 
+    @available(iOS 17.0, *)
     @ViewBuilder
     private func sduiContent(_ loadedConfig: SDUIConfig) -> some View {
         ZStack(alignment: .top) {
@@ -259,6 +260,7 @@ struct OfferSheetView: View {
     /// a visible drag indicator — exact parity with the pre-redesign control
     /// behavior. Dismiss routes through `handleSafariDismiss()` to grant +
     /// transition.
+    @available(iOS 17.0, *)
     private func safariSheet(for wrapper: SafariURLWrapper) -> some View {
         SafariView(url: wrapper.url) { event in
             viewModel.handleSafariTrackingEvent(event)
@@ -276,6 +278,7 @@ struct OfferSheetView: View {
     /// Opt-in (`.inAppBrowser`) in-app Safari, presented via `.fullScreenCover`
     /// so the browser covers the whole screen (no detent / drag indicator).
     /// Dismiss still routes through `handleSafariDismiss()` to grant + transition.
+    @available(iOS 17.0, *)
     private func safariCover(for wrapper: SafariURLWrapper) -> some View {
         SafariView(url: wrapper.url) { event in
             viewModel.handleSafariTrackingEvent(event)

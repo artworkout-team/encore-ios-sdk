@@ -16,7 +16,7 @@ import SwiftUI
 ///
 /// This is a pure SwiftUI view with no UIKit dependencies. The UIKit window
 /// management is handled by `PresentationWindow`.
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct OfferSheetContainer: View {
     
     // MARK: - Presentation State
@@ -123,8 +123,8 @@ struct OfferSheetContainer: View {
             }
             .presentationDetents([.fraction(0.32)])
             .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(OfferSheetStyles.cornerRadius)
-            .presentationBackground(OfferSheetStyles.backgroundColor)
+            .compatiblePresentationCornerRadius(OfferSheetStyles.cornerRadius)
+            .compatiblePresentationBackground(OfferSheetStyles.backgroundColor)
         }
     }
     
@@ -149,7 +149,7 @@ struct CreditData: Identifiable {
 // MARK: - Presentation Style Modifier
 
 /// A ViewModifier that conditionally presents content as either a sheet or fullScreenCover
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct PresentationStyleModifier<PresentationContent: View>: ViewModifier {
     let presentationStyle: SDUIPresentationStyle
     @Binding var presentationState: OfferSheetContainer.PresentationState?

@@ -58,7 +58,7 @@ public final class Encore: EncoreProtocol {
 
     public static let shared = Encore()
 
-    /// Whether this device can present Encore offers at all — the SDK's iOS 17
+    /// Whether this device can present Encore offers at all — the SDK's iOS 16
     /// floor. Read it BEFORE you commit a surface to a placement: on `false`,
     /// `show()` resolves `.notPresented(.unsupportedOS)` without any UI, so the
     /// host should fall through to its own. Configuration-independent, so it is
@@ -69,7 +69,7 @@ public final class Encore: EncoreProtocol {
     /// let result = await Encore.placement("paywall_decline").show()
     /// ```
     public nonisolated static var isSupported: Bool {
-        if #available(iOS 17.0, *) { true } else { false }
+        if #available(iOS 16.0, *) { true } else { false }
     }
 
     /// Controls whether the claim CTA on offer cards is tappable.

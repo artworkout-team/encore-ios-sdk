@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct CreditClaimedView: View {
     let credit: CreditData
     let offerContext: OfferContext

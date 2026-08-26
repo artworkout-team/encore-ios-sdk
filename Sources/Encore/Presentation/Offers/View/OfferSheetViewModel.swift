@@ -42,7 +42,7 @@ private struct PendingClaim {
 }
 
 @MainActor
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 class OfferSheetViewModel: ObservableObject {
     // MARK: - Published Properties
     
@@ -842,7 +842,7 @@ class OfferSheetViewModel: ObservableObject {
 
 // MARK: - Analytics
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 extension OfferSheetViewModel {
     
     // MARK: - Context & Tracking Helpers

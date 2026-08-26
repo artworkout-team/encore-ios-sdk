@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct CompactPageIndicator: View {
     let totalPages: Int
     let currentPage: Int

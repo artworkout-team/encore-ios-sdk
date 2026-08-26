@@ -33,6 +33,19 @@ struct CachedAsyncImage<Placeholder: View>: View {
     @State private var image: UIImage?
     @State private var isLoading = false
 
+    init(
+        url: URL?,
+        contentMode: ContentMode,
+        @ViewBuilder placeholder: @escaping () -> Placeholder,
+        onLoadedVisible: (() -> Void)? = nil
+    ) {
+        self.url = url
+        self.contentMode = contentMode
+        self.placeholder = placeholder
+        self.onLoadedVisible = onLoadedVisible
+        _image = State(initialValue: Self.cachedImage(for: url))
+    }
+
     var body: some View {
         Group {
             if let image {
@@ -47,7 +60,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
         }
         .onAppear { loadIfNeeded() }
         .onChange(of: url) { _ in
-            image = nil
+            image = Self.cachedImage(for: url)
             loadIfNeeded()
         }
     }
@@ -55,14 +68,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
     private func loadIfNeeded() {
         guard image == nil, let url else { return }
 
-        // Synchronous cache probe. `OffersManager.preloadImages` fetches via
-        // `URLSession.shared.data(from:)`, which internally uses
-        // `URLRequest(url:)` with the default cache policy and writes into
-        // `URLCache.shared` automatically. That matches the probe shape here,
-        // so pre-warmed images render on the first frame with no placeholder.
-        let request = URLRequest(url: url)
-        if let cached = URLCache.shared.cachedResponse(for: request),
-           let uiImage = UIImage(data: cached.data) {
+        if let uiImage = Self.cachedImage(for: url) {
             image = uiImage
             return
         }
@@ -74,9 +80,29 @@ struct CachedAsyncImage<Placeholder: View>: View {
             guard let (data, _) = try? await URLSession.shared.data(from: url),
                   let uiImage = UIImage(data: data)
             else { return }
+            CachedImageMemoryCache.images.setObject(uiImage, forKey: url as NSURL)
             image = uiImage
         }
     }
+
+    private static func cachedImage(for url: URL?) -> UIImage? {
+        guard let url else { return nil }
+        if let image = CachedImageMemoryCache.images.object(forKey: url as NSURL) {
+            return image
+        }
+
+        let request = URLRequest(url: url)
+        guard let cached = URLCache.shared.cachedResponse(for: request),
+              let image = UIImage(data: cached.data)
+        else { return nil }
+        CachedImageMemoryCache.images.setObject(image, forKey: url as NSURL)
+        return image
+    }
+}
+
+@MainActor
+private enum CachedImageMemoryCache {
+    static let images = NSCache<NSURL, UIImage>()
 }
 
 // MARK: - Optional Visibility Bridge

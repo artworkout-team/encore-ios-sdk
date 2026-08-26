@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct OfferCardView: View {
     let offer: Offer
     let offerContext: OfferContext
@@ -39,40 +39,25 @@ struct OfferCardView: View {
     
     var body: some View {
         VStack(spacing: 0) {
-            // Offer Image with AsyncImage (353x149 aspect ratio)
-            AsyncImage(url: URL(string: offer.displayPrimaryImageUrl ?? "")) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                case .failure, .empty:
-                    placeholderColor
-                        .aspectRatio(353.0/149.0, contentMode: .fit)
-                @unknown default:
-                    placeholderColor
-                        .aspectRatio(353.0/149.0, contentMode: .fit)
-                }
-            }
+            // Offer Image (353x149 aspect ratio)
+            CachedAsyncImage(
+                url: URL(string: offer.displayPrimaryImageUrl ?? ""),
+                contentMode: .fill,
+                placeholder: { placeholderColor }
+            )
             .frame(maxWidth: .infinity)
+            .aspectRatio(353.0/149.0, contentMode: .fit)
             .clipped()
             .cornerRadius(16)
             
             // Content Container
             HStack(alignment: .center, spacing: 12) {
-                // Left side: Square Logo with AsyncImage
-                AsyncImage(url: URL(string: offer.displayLogoUrl ?? "")) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                    case .failure, .empty:
-                        placeholderColor
-                    @unknown default:
-                        placeholderColor
-                    }
-                }
+                // Left side: Square Logo
+                CachedAsyncImage(
+                    url: URL(string: offer.displayLogoUrl ?? ""),
+                    contentMode: .fit,
+                    placeholder: { placeholderColor }
+                )
                 .frame(width: 50, height: 50)
                 .cornerRadius(8)
                 .clipped()
@@ -118,4 +103,3 @@ struct OfferCardView: View {
         .shadow(color: shadowColor, radius: 4)
     }
 }
-

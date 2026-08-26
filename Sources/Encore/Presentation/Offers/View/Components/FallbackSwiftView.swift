@@ -5,11 +5,12 @@
 //  SwiftUI view and components for the fallback (non-SDUI) offer sheet layout.
 //
 
+import Combine
 import SwiftUI
 
 // MARK: - Fallback Offer Sheet View
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct FallbackOfferSheetView: View {
     @ObservedObject var viewModel: OfferSheetViewModel
     let preferredColorScheme: ColorScheme?
@@ -17,6 +18,8 @@ struct FallbackOfferSheetView: View {
     let onClose: () -> Void
     let onSafariEvent: (SafariTrackingEvent) -> Void
     let onSafariDismiss: () -> Void
+
+    @State private var trackedOfferIndex: Int?
     
     private var accentColor: Color {
         if let hex = viewModel.offerContext.accentColor {
@@ -33,7 +36,7 @@ struct FallbackOfferSheetView: View {
             mainContent
         }
         .presentationDetents([.fraction(0.48), .fraction(0.95)])
-        .presentationCornerRadius(OfferSheetStyles.cornerRadius)
+        .compatiblePresentationCornerRadius(OfferSheetStyles.cornerRadius)
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(false)
         .preferredColorScheme(preferredColorScheme)
@@ -43,17 +46,21 @@ struct FallbackOfferSheetView: View {
             }
             .presentationDetents([.fraction(0.95)])
             .presentationDragIndicator(.visible)
-            .presentationCornerRadius(OfferSheetStyles.safariCornerRadius)
+            .compatiblePresentationCornerRadius(OfferSheetStyles.safariCornerRadius)
             .interactiveDismissDisabled(false)
             .onDisappear {
                 Logger.info(.presentation, "Safari dismissed")
                 onSafariDismiss()
             }
         }
-        .onChange(of: viewModel.currentOfferIndex) { oldValue, newValue in
-            if let newIndex = newValue {
-                viewModel.trackOfferSwipe(from: oldValue, to: newIndex)
+        .onReceive(viewModel.$currentOfferIndex.removeDuplicates()) { newIndex in
+            guard let newIndex else { return }
+            defer { trackedOfferIndex = newIndex }
+
+            if let trackedOfferIndex, trackedOfferIndex != newIndex {
+                viewModel.trackOfferSwipe(from: trackedOfferIndex, to: newIndex)
             }
+            viewModel.trackOfferImpression(at: newIndex)
         }
     }
     
@@ -69,8 +76,7 @@ struct FallbackOfferSheetView: View {
                 currentIndex: $viewModel.currentOfferIndex,
                 offerContext: viewModel.offerContext,
                 isClaimDisabled: isClaimDisabled,
-                onOfferTap: viewModel.handleOfferTap,
-                onIndexChange: viewModel.trackOfferImpression
+                onOfferTap: viewModel.handleOfferTap
             )
             .layoutPriority(1)
             .padding(.top, 20)
@@ -95,7 +101,7 @@ struct FallbackOfferSheetView: View {
 
 // MARK: - Sheet Header
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct SheetHeaderView: View {
     let offerContext: OfferContext
     let onClose: () -> Void
@@ -120,27 +126,48 @@ struct SheetHeaderView: View {
                 .padding(.top, 2)
             }
             
-            // Title and Subtitle
-            VStack(alignment: .leading, spacing: 8) {
+            HeaderCopyView(offerContext: offerContext)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, OfferSheetStyles.horizontalPadding)
+                .padding(.top, 8)
+        }
+    }
+}
+
+@available(iOS 16.0, *)
+private struct HeaderCopyView: View {
+    let offerContext: OfferContext
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch offerContext.useCase {
+            case .rewardUsers:
+                rewardHeadline
+                    .font(OfferSheetStyles.titleFont)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(offerContext.rewardSubheadlineText ?? "Choose an offer below to claim it")
+                    .font(OfferSheetStyles.subtitleFont)
+                    .foregroundColor(OfferSheetStyles.secondaryText)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .reduceChurn:
                 (Text(offerContext.titleText ?? "Get 1 month")
                     .foregroundColor(OfferSheetStyles.primaryText) +
                  Text(accentTitleTextWithSpace)
                     .foregroundColor(accentTitleColor))
                     .font(OfferSheetStyles.titleFont)
                     .fixedSize(horizontal: false, vertical: true)
-                
+
                 Text(offerContext.subtitleText ?? "Claim an exclusive offer and get free access to all features")
                     .font(OfferSheetStyles.subtitleFont)
                     .foregroundColor(OfferSheetStyles.secondaryText)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, OfferSheetStyles.horizontalPadding)
-            .padding(.top, 8)
         }
     }
-    
+
     private var accentTitleTextWithSpace: String {
         let text = offerContext.accentTitleText ?? " for free"
         if text.isEmpty { return text }
@@ -153,11 +180,19 @@ struct SheetHeaderView: View {
         }
         return Color(hex: "#16BD25")
     }
+
+    private var rewardHeadline: Text {
+        let headline = offerContext.rewardHeadlineText ?? "You've earned a reward"
+        return SDUIInlineMarkup.parse(headline).reduce(Text("")) { text, run in
+            text + Text(run.text)
+                .foregroundColor(run.isHighlighted ? accentTitleColor : OfferSheetStyles.primaryText)
+        }
+    }
 }
 
 // MARK: - Instructions
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct InstructionsView: View {
     let offer: Offer
     
@@ -196,35 +231,152 @@ struct InstructionsView: View {
 
 // MARK: - Carousel
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct CarouselView: View {
     let offers: [Offer]
     @Binding var currentIndex: Int?
     let offerContext: OfferContext
     var isClaimDisabled: Bool = false
     let onOfferTap: @MainActor (Offer) -> Void
-    let onIndexChange: @MainActor (Int) -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: OfferSheetStyles.carouselSpacing) {
-                ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
-                    OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
-                        onOfferTap(offer)
-                    }
-                    .containerRelativeFrame(.horizontal)
-                    .id(index)
-                }
-            }
-            .scrollTargetLayout()
+        if #available(iOS 17.0, *) {
+            ScrollOfferPager(
+                offers: offers,
+                currentIndex: $currentIndex,
+                offerContext: offerContext,
+                isClaimDisabled: isClaimDisabled,
+                onOfferTap: onOfferTap
+            )
+        } else {
+            TabOfferPager(
+                offers: offers,
+                currentIndex: $currentIndex,
+                offerContext: offerContext,
+                isClaimDisabled: isClaimDisabled,
+                onOfferTap: onOfferTap
+            )
         }
-        .scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: $currentIndex)
-        .contentMargins(.horizontal, OfferSheetStyles.carouselMargin, for: .scrollContent)
-        .onChange(of: currentIndex) { newIndex in
-            if let index = newIndex {
-                onIndexChange(index)
+    }
+}
+
+@available(iOS 17.0, *)
+private struct ScrollOfferPager: View {
+    let offers: [Offer]
+    @Binding var currentIndex: Int?
+    let offerContext: OfferContext
+    let isClaimDisabled: Bool
+    let onOfferTap: @MainActor (Offer) -> Void
+
+    @State private var scrollPosition: Int?
+
+    init(
+        offers: [Offer],
+        currentIndex: Binding<Int?>,
+        offerContext: OfferContext,
+        isClaimDisabled: Bool,
+        onOfferTap: @escaping @MainActor (Offer) -> Void
+    ) {
+        self.offers = offers
+        _currentIndex = currentIndex
+        self.offerContext = offerContext
+        self.isClaimDisabled = isClaimDisabled
+        self.onOfferTap = onOfferTap
+        _scrollPosition = State(initialValue: currentIndex.wrappedValue)
+    }
+
+    var body: some View {
+        GeometryReader { viewportProxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: OfferSheetStyles.carouselSpacing) {
+                    ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
+                        OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
+                            onOfferTap(offer)
+                        }
+                        .containerRelativeFrame(.horizontal)
+                        .background {
+                            GeometryReader { cardProxy in
+                                Color.clear.preference(
+                                    key: OfferCardCenterPreferenceKey.self,
+                                    value: [index: cardProxy.frame(in: .global).midX]
+                                )
+                            }
+                        }
+                        .id(index)
+                    }
+                }
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $scrollPosition, anchor: .center)
+            .contentMargins(.horizontal, OfferSheetStyles.carouselMargin, for: .scrollContent)
+            .onPreferenceChange(OfferCardCenterPreferenceKey.self) { centers in
+                updateCurrentIndex(
+                    from: centers,
+                    viewportCenter: viewportProxy.frame(in: .global).midX
+                )
+            }
+        }
+    }
+
+    private func updateCurrentIndex(from centers: [Int: CGFloat], viewportCenter: CGFloat) {
+        guard centers.count == offers.count,
+              let focusedIndex = centers.min(by: {
+                  abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
+              })?.key,
+              focusedIndex != currentIndex
+        else { return }
+        currentIndex = focusedIndex
+    }
+}
+
+private struct OfferCardCenterPreferenceKey: PreferenceKey {
+    static let defaultValue: [Int: CGFloat] = [:]
+
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
+@available(iOS 16.0, *)
+private struct TabOfferPager: View {
+    let offers: [Offer]
+    @Binding var currentIndex: Int?
+    let offerContext: OfferContext
+    let isClaimDisabled: Bool
+    let onOfferTap: @MainActor (Offer) -> Void
+
+    var body: some View {
+        TabView(selection: $currentIndex) {
+            ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
+                OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
+                    onOfferTap(offer)
+                }
+                .padding(.horizontal, OfferSheetStyles.carouselMargin)
+                .tag(Optional(index))
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+}
+
+@available(iOS 16.0, *)
+extension View {
+    @ViewBuilder
+    func compatiblePresentationCornerRadius(_ radius: CGFloat?) -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationCornerRadius(radius)
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder
+    func compatiblePresentationBackground(_ color: Color) -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationBackground(color)
+        } else {
+            self
         }
     }
 }

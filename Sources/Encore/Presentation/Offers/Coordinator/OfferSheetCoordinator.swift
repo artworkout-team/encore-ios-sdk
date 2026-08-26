@@ -127,7 +127,7 @@ internal final class OfferSheetCoordinator {
         // host reads beforehand can never drift apart.
         guard Encore.isSupported else {
             let version = UIDevice.current.systemVersion
-            Logger.debug("SwiftUI offers require iOS 17+. Current: \(version)")
+            Logger.debug("SwiftUI offers require iOS 16+. Current: \(version)")
             enqueueDiagnostic(.showAborted(reason: .unsupportedOS, placementId: placementLabel, distinctId: EventEnvelope.resolveDistinctId(), variantId: variantId, useCase: useCase, presentationId: presentationId, iosVersion: version))
             return (.notPresented(.unsupportedOS), presentationId)
         }
@@ -329,7 +329,7 @@ internal final class OfferSheetCoordinator {
                     guard let iapProductIdForPurchase = iapProductId else {
                         Logger.warn(.iap, "triggerIAPFirst is true but no iapProductId configured")
                         sduiConfigManager?.useFallbackConfig(for: useCase, reason: "No iapProductId for triggerIAPFirst")
-                        if #available(iOS 17.0, *) {
+                        if #available(iOS 16.0, *) {
                             self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
                         }
                         return
@@ -340,7 +340,7 @@ internal final class OfferSheetCoordinator {
 
                     if outcome == .purchased {
                         Logger.info(.iap, "Purchase successful - showing offers")
-                        if #available(iOS 17.0, *) {
+                        if #available(iOS 16.0, *) {
                             // The purchase already happened — stage it so the
                             // record carries it however the sheet ends.
                             self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil, initiallyPurchased: true)
@@ -361,7 +361,7 @@ internal final class OfferSheetCoordinator {
                     return
                 }
 
-                if #available(iOS 17.0, *) {
+                if #available(iOS 16.0, *) {
                     self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
                 }
             } catch let error as EncoreError {
@@ -384,7 +384,7 @@ internal final class OfferSheetCoordinator {
         Self.current = ActivePresentation(coordinator: self, phase: .loading(task: task))
     }
 
-    @available(iOS 17.0, *)
+    @available(iOS 16.0, *)
     private func presentOfferSheet(response: OfferResponse, userId: String, offerContext: OfferContext, initialStateOverride: String?, initiallyPurchased: Bool = false) {
         // The flow may already have resolved — presenting now would leak a
         // window nobody owns or tears down.

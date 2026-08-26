@@ -16,11 +16,25 @@ struct SDUIElementRenderer: View {
     @ObservedObject var context: SDUIContext
     var offer: Offer? = nil
     var isCurrentPage: Bool = false
+    @State private var renderEnvironment: SDUIRenderEnvironment
 
     /// Observed so the tree re-renders when a logo's dominant color is
     /// extracted asynchronously, letting `{"binding": "offerDominantColor"}`
     /// update from the neutral fallback to the real brand color.
     @ObservedObject private var dominantColors = DominantColorStore.shared
+
+    init(
+        element: SDUIElement,
+        context: SDUIContext,
+        offer: Offer? = nil,
+        isCurrentPage: Bool = false
+    ) {
+        self.element = element
+        self._context = ObservedObject(wrappedValue: context)
+        self.offer = offer
+        self.isCurrentPage = isCurrentPage
+        self._renderEnvironment = State(initialValue: SDUIRenderEnvironment(context: context, offer: offer))
+    }
 
     var body: some View {
         renderElement(element)
@@ -30,7 +44,7 @@ struct SDUIElementRenderer: View {
             .environment(\.sduiColorValues, colorValues)
             // Publish context + row offer so generic modifiers can render
             // sub-elements (style.overlay / style.backgroundElement).
-            .environment(\.sduiRenderEnvironment, SDUIRenderEnvironment(context: context, offer: offer))
+            .environment(\.sduiRenderEnvironment, renderEnvironment)
     }
 
     /// Per-render color binding values: the current row offer's dominant color

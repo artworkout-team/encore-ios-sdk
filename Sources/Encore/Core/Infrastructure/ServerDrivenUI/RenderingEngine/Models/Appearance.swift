@@ -223,12 +223,17 @@ extension EnvironmentValues {
 /// (`style.overlay`, `style.backgroundElement`) through `SDUIElementRenderer`.
 /// Set per element in the renderer's `body`.
 @available(iOS 17.0, *)
-struct SDUIRenderEnvironment: Equatable {
+final class SDUIRenderEnvironment: Equatable {
     weak var context: SDUIContext?
-    var offer: Offer?
+    let offer: Offer?
+
+    init(context: SDUIContext? = nil, offer: Offer? = nil) {
+        self.context = context
+        self.offer = offer
+    }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.context === rhs.context && lhs.offer?.id == rhs.offer?.id
+        lhs === rhs
     }
 }
 

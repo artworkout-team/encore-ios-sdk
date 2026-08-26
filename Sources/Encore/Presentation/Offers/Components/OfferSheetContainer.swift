@@ -49,7 +49,7 @@ struct OfferSheetContainer: View {
     var initiallyPurchased: Bool = false
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
     
-    @State private var presentationState: PresentationState? = .offers
+    @State private var presentationState: PresentationState?
     
     /// Presentation style from cached server config, resolved for this
     /// presentation's use case.
@@ -68,6 +68,13 @@ struct OfferSheetContainer: View {
                     presentationContent(for: state)
                 }
             ))
+            .onAppear {
+                // iOS 17 does not present a sheet whose item is already
+                // non-nil before the hosting view joins a window. Trigger the
+                // first presentation only after the container is attached.
+                guard presentationState == nil else { return }
+                presentationState = .offers
+            }
             .onDisappear {
                 // Coordinator's complete() owns cleanup.
                 #if DEBUG

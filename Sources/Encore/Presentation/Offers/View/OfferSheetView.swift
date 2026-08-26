@@ -15,12 +15,11 @@ struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
 
-    /// SDUI config from SDUIConfigurationManager, resolved for this
-    /// presentation's use case (pre-fetched on identify for `.reduceChurn`, lazily
-    /// on first presentation for every other use case).
-    private var config: SDUIConfig? {
-        sduiConfigManager?.layout(for: viewModel.offerContext.useCase)
-    }
+    /// Immutable SDUI snapshot for this presentation. Resolving it once keeps
+    /// the recursive config tree out of repeated SwiftUI body evaluation and
+    /// prevents a late config arrival from replacing the visible hierarchy.
+    private let config: SDUIConfig?
+    private let variantId: String?
 
     /// Computed property to determine the preferred color scheme based on appearance mode
     private var preferredColorScheme: ColorScheme? {
@@ -51,6 +50,8 @@ struct OfferSheetView: View {
     ) {
         self.initialStateOverride = initialStateOverride
         self.onDismiss = onDismiss
+        config = sduiConfigManager?.layout(for: offerContext.useCase)
+        variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
 
         let handler = SheetDismissHandler(onCompletion: onCompletion, initiallyPurchased: initiallyPurchased)
         _viewModel = StateObject(wrappedValue: OfferSheetViewModel(
@@ -98,7 +99,7 @@ struct OfferSheetView: View {
 
             // Set variant metadata for analytics
             viewModel.setVariantMetadata(
-                variantId: sduiConfigManager?.variantId(for: viewModel.offerContext.useCase),
+                variantId: variantId,
                 context: sduiContext
             )
 

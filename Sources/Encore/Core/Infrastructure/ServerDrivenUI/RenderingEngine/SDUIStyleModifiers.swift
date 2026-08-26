@@ -510,7 +510,7 @@ struct SDUIScrollTransitionModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if let t = transition {
+        if #available(iOS 18.0, *), let t = transition {
             // Single trailing expression (no intermediate `let`s / explicit
             // `return`): a multi-statement closure that returns the opaque
             // `some VisualEffect` fails return-type inference on stricter

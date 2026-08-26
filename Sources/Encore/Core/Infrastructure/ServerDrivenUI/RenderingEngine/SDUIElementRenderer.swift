@@ -493,7 +493,11 @@ struct SDUIElementRenderer: View {
         .accessibilityIdentifier(config.action.type == .claimOffer ? "encore_claim_offer_button" : "")
 
         if config.action.type == .selectOffer {
-            button.buttonStyle(SDUICarouselButtonStyle())
+            if #available(iOS 18.0, *) {
+                button.buttonStyle(.plain)
+            } else {
+                button.buttonStyle(SDUICarouselButtonStyle())
+            }
         } else {
             button.buttonStyle(.plain)
         }

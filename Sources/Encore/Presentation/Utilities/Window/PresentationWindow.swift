@@ -88,25 +88,32 @@ internal enum PresentationWindow {
         newWindow.frame = windowScene.coordinateSpace.bounds
         newWindow.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1000)
         newWindow.backgroundColor = .clear
-        newWindow.rootViewController = UIViewController()
-        if #available(iOS 18.0, *) {
-            newWindow.isHidden = false
-        } else {
-            previousKeyWindow = windowScene.windows.first(where: \.isKeyWindow)
-            newWindow.makeKeyAndVisible()
-        }
         
         // Create hosting controller
         let hosting = UIHostingController(rootView: rootView)
         hosting.modalPresentationStyle = .overFullScreen
         hosting.view.backgroundColor = .clear
+
+        if #available(iOS 18.0, *) {
+            newWindow.rootViewController = UIViewController()
+            newWindow.isHidden = false
+        } else {
+            // A UIKit modal containing another SwiftUI sheet stays transparent
+            // on iOS 17. Host the container directly at the window root so its
+            // own sheet/full-screen-cover presentation has a visible presenter.
+            previousKeyWindow = windowScene.windows.first(where: \.isKeyWindow)
+            newWindow.rootViewController = hosting
+            newWindow.makeKeyAndVisible()
+        }
         
         // Store references
         window = newWindow
         hostingController = hosting
         
-        // Present
-        newWindow.rootViewController?.present(hosting, animated: true)
+        // iOS 17 already hosts the container at the window root.
+        if #available(iOS 18.0, *) {
+            newWindow.rootViewController?.present(hosting, animated: true)
+        }
         return newWindow
     }
     

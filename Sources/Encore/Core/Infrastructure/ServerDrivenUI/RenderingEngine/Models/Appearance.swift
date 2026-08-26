@@ -78,7 +78,7 @@ enum SDUIAppearanceColor: String, Decodable {
 /// Injected into the SwiftUI environment via `\.sduiAppearance` so any
 /// `ViewModifier` can resolve `SDUIColor.appearance(_)` without explicit
 /// plumbing.
-struct Appearance {
+struct Appearance: Equatable {
     let accent: Color
     let onAccent: Color
     let accentTitle: Color
@@ -223,9 +223,13 @@ extension EnvironmentValues {
 /// (`style.overlay`, `style.backgroundElement`) through `SDUIElementRenderer`.
 /// Set per element in the renderer's `body`.
 @available(iOS 17.0, *)
-struct SDUIRenderEnvironment {
+struct SDUIRenderEnvironment: Equatable {
     weak var context: SDUIContext?
     var offer: Offer?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.context === rhs.context && lhs.offer?.id == rhs.offer?.id
+    }
 }
 
 @available(iOS 17.0, *)

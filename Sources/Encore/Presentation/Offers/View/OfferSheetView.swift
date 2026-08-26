@@ -179,7 +179,7 @@ struct OfferSheetView: View {
         ))
         // Expose the active Appearance to ViewModifiers (e.g. SDUIBackgroundModifier)
         // so `{"appearance": "accent"}` in variant JSON resolves to the per-app brand color.
-        .environment(\.sduiAppearance, Appearance(from: sduiContext.offerContext.uiValues))
+        .environment(\.sduiAppearance, sduiContext.appearance)
         .presentationDetents(detentsForCurrentState(loadedConfig))
         .applyCornerRadius(loadedConfig.cornerRadius)
         .presentationDragIndicator(loadedConfig.showDragIndicator == true ? .visible : .hidden)

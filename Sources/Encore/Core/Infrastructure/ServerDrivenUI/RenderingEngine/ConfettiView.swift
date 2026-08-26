@@ -41,23 +41,11 @@ struct ConfettiView: UIViewRepresentable {
     /// Fraction (0...1) of the container height the settled scatter spans.
     let scatterHeight: Double
 
-    func makeUIView(context _: Context) -> ConfettiEmitterUIView {
+    func makeUIView(context: Context) -> ConfettiEmitterUIView {
         let view = ConfettiEmitterUIView()
-        let animatedIntensity: Int
-        if #available(iOS 18.0, *) {
-            animatedIntensity = intensity
-        } else {
-            // On iOS 17 an active CAEmitterLayer inside this full-screen
-            // UIViewRepresentable keeps SwiftUI's entire recursive SDUI tree
-            // in a display-link layout loop. The main queue never reaches the
-            // delayed emitter shutdown, so the sheet stops processing touches.
-            // Keep the deterministic static scatter on that OS, but reserve
-            // the animated burst for iOS 18+, where it stays render-server-only.
-            animatedIntensity = 0
-        }
         view.configure(
             colors: colors,
-            intensity: animatedIntensity,
+            intensity: intensity,
             duration: duration,
             originY: originY,
             originX: originX,
@@ -67,7 +55,7 @@ struct ConfettiView: UIViewRepresentable {
         return view
     }
 
-    func updateUIView(_: ConfettiEmitterUIView, context _: Context) {}
+    func updateUIView(_ uiView: ConfettiEmitterUIView, context: Context) {}
 }
 
 /// UIView host that owns the `CAEmitterLayer`, sizes the emission line to its
@@ -80,7 +68,7 @@ final class ConfettiEmitterUIView: UIView {
     private var intensity: Int = 20
     private var duration: Double = 2.5
     private var originY: Double = 0
-    private var originX: Double?
+    private var originX: Double? = nil
     private var scatter: Int = 0
     private var scatterHeight: Double = 0.45
     private var didStart = false
@@ -115,7 +103,7 @@ final class ConfettiEmitterUIView: UIView {
         scatterHeight: Double
     ) {
         self.colors = colors.isEmpty ? Self.defaultPalette : colors
-        self.intensity = max(0, intensity)
+        self.intensity = max(1, intensity)
         self.duration = max(0.1, duration)
         self.originY = min(1, max(0, originY))
         self.originX = originX.map { min(1, max(0, $0)) }
@@ -147,7 +135,7 @@ final class ConfettiEmitterUIView: UIView {
     }
 
     private func startIfNeeded() {
-        guard !didStart, bounds.width > 0, intensity > 0 else { return }
+        guard !didStart, bounds.width > 0 else { return }
         didStart = true
 
         emitter.beginTime = CACurrentMediaTime()
@@ -209,7 +197,7 @@ final class ConfettiEmitterUIView: UIView {
     /// `layer.render(in:)`, so a particle-based "settled" layer would still be
     /// missing from every screenshot and snapshot test. Drawn pieces are real
     /// view content and show up everywhere the view does.
-    override func draw(_: CGRect) {
+    override func draw(_ rect: CGRect) {
         guard scatter > 0, bounds.width > 0, bounds.height > 0,
               let ctx = UIGraphicsGetCurrentContext() else { return }
 
@@ -219,7 +207,7 @@ final class ConfettiEmitterUIView: UIView {
         var rng = SeededGenerator(seed: 0x5EED_C0FE)
         let band = bounds.height * CGFloat(scatterHeight)
 
-        for index in 0 ..< scatter {
+        for index in 0..<scatter {
             // Bleed slightly past both edges so pieces are clipped by the frame
             // rather than all sitting neatly inside it.
             let x = bounds.minX - 10 + rng.next(upTo: bounds.width + 20)
@@ -248,7 +236,7 @@ final class ConfettiEmitterUIView: UIView {
     /// design leans on, with diamonds and squiggles for variety.
     private static let scatterShapes: [ScatterShape] = [
         .circle, .ribbon, .diamond, .circle, .squiggle, .ribbon,
-        .circle, .diamond, .ribbon, .squiggle,
+        .circle, .diamond, .ribbon, .squiggle
     ]
 
     enum ScatterShape {
@@ -311,9 +299,7 @@ final class ConfettiEmitterUIView: UIView {
     struct SeededGenerator {
         private var state: UInt64
 
-        init(seed: UInt64) {
-            state = seed
-        }
+        init(seed: UInt64) { self.state = seed }
 
         mutating func nextBits() -> UInt64 {
             state &+= 0x9E37_79B9_7F4A_7C15
@@ -371,7 +357,7 @@ final class ConfettiEmitterUIView: UIView {
         UIColor(red: 1.00, green: 0.80, blue: 0.00, alpha: 1), // yellow
         UIColor(red: 0.20, green: 0.78, blue: 0.35, alpha: 1), // green
         UIColor(red: 0.00, green: 0.48, blue: 1.00, alpha: 1), // blue
-        UIColor(red: 0.69, green: 0.32, blue: 0.87, alpha: 1), // purple
+        UIColor(red: 0.69, green: 0.32, blue: 0.87, alpha: 1)  // purple
     ]
 }
 #endif

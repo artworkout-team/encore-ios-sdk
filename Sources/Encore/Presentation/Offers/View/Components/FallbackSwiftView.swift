@@ -294,19 +294,18 @@ private struct ScrollOfferPager: View {
             .scrollPosition(id: $currentIndex.animation(.default))
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .onPreferenceChange(OfferPageCenterPreferenceKey.self) { pageCenters in
-                updateSettledPage(from: pageCenters, viewportCenter: geometry.frame(in: .global).midX)
+                updateVisiblePage(from: pageCenters, viewportCenter: geometry.frame(in: .global).midX)
             }
         }
     }
 
-    private func updateSettledPage(from pageCenters: [Int: CGFloat], viewportCenter: CGFloat) {
-        guard let centeredPage = pageCenters.min(by: {
+    private func updateVisiblePage(from pageCenters: [Int: CGFloat], viewportCenter: CGFloat) {
+        guard let visiblePage = pageCenters.min(by: {
             abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
         }),
-              abs(centeredPage.value - viewportCenter) < 1,
-              centeredPage.key != currentIndex
+              visiblePage.key != currentIndex
         else { return }
-        currentIndex = centeredPage.key
+        currentIndex = visiblePage.key
     }
 }
 

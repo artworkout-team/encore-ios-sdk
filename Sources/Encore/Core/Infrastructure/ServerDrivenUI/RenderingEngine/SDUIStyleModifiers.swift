@@ -484,28 +484,40 @@ struct SDUIGradientBorderModifier: ViewModifier {
     }
 }
 
-/// Carousel cards use their signed distance from the selected center so wide
-/// iPad viewports still render the adjacent-card coverflow treatment. Other
-/// scroll-transition elements keep SwiftUI's viewport-driven interactive phase.
+/// Carousel cards derive a continuous phase from their frame in the horizontal
+/// scroll-view coordinate space. Other scroll-transition elements keep
+/// SwiftUI's native viewport-driven interactive phase.
 @available(iOS 17.0, *)
 struct SDUIScrollTransitionModifier: ViewModifier {
     let transition: SDUIScrollTransition?
 
-    @Environment(\.sduiCarouselRelativePosition) private var carouselRelativePosition
-    @Environment(\.sduiIsRTL) private var isRTL
+    @Environment(\.sduiCarouselViewportWidth) private var carouselViewportWidth
 
     func body(content: Content) -> some View {
-        if let transition, let carouselRelativePosition {
-            let direction: Double = isRTL ? -1 : 1
-            let signedPosition = carouselRelativePosition * direction
-            let magnitude = min(1, abs(signedPosition))
-            let clampedPosition = min(1, max(-1, signedPosition))
-            content
-                .scaleEffect(1 - (1 - Double(transition.scale ?? 1)) * magnitude)
-                .opacity(1 - (1 - Double(transition.opacity ?? 1)) * magnitude)
-                .rotationEffect(.degrees(Double(transition.rotation ?? 0) * clampedPosition))
-                .offset(y: Double(transition.yOffset ?? 0) * magnitude)
-                .animation(.easeInOut(duration: 0.25), value: carouselRelativePosition)
+        if let transition, let carouselViewportWidth {
+            content.visualEffect { view, geometryProxy in
+                view
+                    .scaleEffect(Self.scale(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+                    .opacity(Self.opacity(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+                    .rotationEffect(.degrees(Self.rotation(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    )))
+                    .offset(y: Self.yOffset(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+            }
         } else if let transition {
             // Single trailing expression (no intermediate `let`s / explicit
             // `return`): a multi-statement closure that returns the opaque
@@ -522,6 +534,48 @@ struct SDUIScrollTransitionModifier: ViewModifier {
         } else {
             content
         }
+    }
+
+    private nonisolated static func phase(frame: CGRect, viewportWidth: CGFloat) -> Double {
+        guard frame.width > 0 else { return 0 }
+        let position = Double(frame.midX - viewportWidth / 2) / Double(frame.width)
+        return min(1, max(-1, position))
+    }
+
+    private nonisolated static func magnitude(frame: CGRect, viewportWidth: CGFloat) -> Double {
+        abs(phase(frame: frame, viewportWidth: viewportWidth))
+    }
+
+    private nonisolated static func scale(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        1 - (1 - Double(transition.scale ?? 1)) * magnitude(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func opacity(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        1 - (1 - Double(transition.opacity ?? 1)) * magnitude(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func rotation(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        Double(transition.rotation ?? 0) * phase(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func yOffset(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        Double(transition.yOffset ?? 0) * magnitude(frame: frame, viewportWidth: viewportWidth)
     }
 }
 

@@ -211,10 +211,6 @@ private struct SDUIColorValuesKey: EnvironmentKey {
 
 @available(iOS 17.0, *)
 extension EnvironmentValues {
-    var sduiIsRTL: Bool {
-        layoutDirection == .rightToLeft
-    }
-
     var sduiColorValues: [String: String] {
         get { self[SDUIColorValuesKey.self] }
         set { self[SDUIColorValuesKey.self] = newValue }
@@ -234,12 +230,11 @@ private struct SDUIScrollFadeDistanceKey: EnvironmentKey {
     static let defaultValue: Double = 0
 }
 
-/// Signed display-space distance from a carousel card to the centered card.
-/// Nil outside a carousel so ordinary `scrollTransition` elements keep using
-/// SwiftUI's viewport-driven interactive phase.
+/// Width of the carousel viewport. Nil outside a centered offer carousel so
+/// ordinary `scrollTransition` elements keep SwiftUI's native phase.
 @available(iOS 17.0, *)
-private struct SDUICarouselRelativePositionKey: EnvironmentKey {
-    static let defaultValue: Double? = nil
+private struct SDUICarouselViewportWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
 }
 
 @available(iOS 17.0, *)
@@ -249,8 +244,8 @@ extension EnvironmentValues {
         set { self[SDUIScrollFadeDistanceKey.self] = newValue }
     }
 
-    var sduiCarouselRelativePosition: Double? {
-        get { self[SDUICarouselRelativePositionKey.self] }
-        set { self[SDUICarouselRelativePositionKey.self] = newValue }
+    var sduiCarouselViewportWidth: CGFloat? {
+        get { self[SDUICarouselViewportWidthKey.self] }
+        set { self[SDUICarouselViewportWidthKey.self] = newValue }
     }
 }

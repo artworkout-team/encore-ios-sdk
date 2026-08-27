@@ -760,7 +760,6 @@ struct SDUIElementRenderer: View {
                 .id(index)
                 .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
                 .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
-                .environment(\.sduiCarouselRelativePosition, Double(index - centeredIndex))
         }
     }
 
@@ -1030,10 +1029,13 @@ private struct SDUIScrollViewRenderer: View {
             Group {
                 if usesCenteredGeometry {
                     GeometryReader { geometryProxy in
-                        scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
-                            for: config,
+                        scrollView(
+                            contentMargin: SDUIScrollLayout.centeredContentMargin(
+                                for: config,
+                                viewportWidth: geometryProxy.size.width
+                            ),
                             viewportWidth: geometryProxy.size.width
-                        ))
+                        )
                         .onPreferenceChange(SDUIOfferCenterPreferenceKey.self) { offerCenters in
                             updateVisibleOffer(
                                 from: offerCenters,
@@ -1043,7 +1045,7 @@ private struct SDUIScrollViewRenderer: View {
                     }
                     .modifier(SDUIStyleModifier(style: config.style))
                 } else {
-                    scrollView(contentMargin: resolvedContentMargin)
+                    scrollView(contentMargin: resolvedContentMargin, viewportWidth: nil)
                         .modifier(SDUIStyleModifier(style: config.style))
                 }
             }
@@ -1060,9 +1062,10 @@ private struct SDUIScrollViewRenderer: View {
         }
     }
 
-    private func scrollView(contentMargin: CGFloat?) -> some View {
+    private func scrollView(contentMargin: CGFloat?, viewportWidth: CGFloat?) -> some View {
         ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
             scrollContent(centeredPadding: usesCenteredGeometry ? contentMargin : nil)
+                .environment(\.sduiCarouselViewportWidth, viewportWidth)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(usesCenteredGeometry ? nil : contentMargin, axis: axis)

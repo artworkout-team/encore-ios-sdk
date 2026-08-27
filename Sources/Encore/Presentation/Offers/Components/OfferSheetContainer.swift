@@ -26,19 +26,6 @@ enum OfferSheetPresentationHost {
         }
     }
 
-    var completesOnDismissRequest: Bool {
-        switch self {
-        case .managedWindow(.fullScreenCover), .viewController: return true
-        case .managedWindow(.sheet): return false
-        }
-    }
-
-    var requestsHostDismissalAfterCompletion: Bool {
-        switch self {
-        case .viewController: return true
-        case .managedWindow: return false
-        }
-    }
 }
 
 /// Container view that hosts the offer sheet presentation flow.

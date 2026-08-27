@@ -241,12 +241,13 @@ struct OfferSheetView: View {
         completionHandler: SheetDismissHandler,
         onDismiss: () -> Void
     ) {
-        if presentationHost.completesOnDismissRequest {
+        switch presentationHost {
+        case .managedWindow(.sheet):
+            onDismiss()
+        case .managedWindow(.fullScreenCover):
             completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
-            if presentationHost.requestsHostDismissalAfterCompletion {
-                onDismiss()
-            }
-        } else {
+        case .viewController:
+            completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
             onDismiss()
         }
     }

@@ -27,8 +27,11 @@ public protocol PlacementBuilderProtocol {
 
     /// Builds a host-owned offer controller and delivers its terminal result.
     ///
-    /// The returned controller dismisses itself through its navigation or
-    /// presenting controller. `resume` runs on the main actor after dismissal.
+    /// `resume` runs on the main actor before the controller's automatic
+    /// dismissal, allowing the host to replace or remove it from its own
+    /// hierarchy first. If the host leaves it in place, the controller falls
+    /// back to a normal navigation pop or modal dismissal.
+    ///
     /// If the placement cannot be built, this returns `nil` and still invokes
     /// `resume` with the corresponding `.notPresented` result.
     func makeViewController(
@@ -82,6 +85,13 @@ public extension PlacementBuilderProtocol {
 
     func prefetch() {
         Encore.shared.prefetchOffers(placementLabel: PlacementLabel.sanitized(id))
+    }
+
+    func makeViewController(
+        resume: @escaping @MainActor (PresentationResult) -> Void
+    ) async -> UIViewController? {
+        resume(.notPresented(.notConfigured))
+        return nil
     }
 
     func makeViewController() async -> UIViewController? {

@@ -101,12 +101,7 @@ internal final class OfferSheetCoordinator {
         useCase: UseCase = .reduceChurn,
         copyOverrides: [String: String] = [:]
     ) async -> PresentationResult {
-        let (result, presentationId) = await presentCore(
-            placementId: placementId,
-            placementLabel: placementLabel,
-            useCase: useCase,
-            copyOverrides: copyOverrides
-        )
+        let (result, presentationId) = await presentCore(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides)
         publish(
             result,
             placementId: placementId,
@@ -133,7 +128,7 @@ internal final class OfferSheetCoordinator {
             copyOverrides: copyOverrides,
             presentationTarget: .viewController
         ) {
-        case let .resolved(result, presentationId):
+        case .resolved(let result, let presentationId):
             publish(
                 result,
                 placementId: placementId,
@@ -144,7 +139,7 @@ internal final class OfferSheetCoordinator {
             resume(result)
             return nil
 
-        case let .ready(coordinator):
+        case .ready(let coordinator):
             return await coordinator.buildViewController { result in
                 publish(
                     result,
@@ -196,9 +191,9 @@ internal final class OfferSheetCoordinator {
             copyOverrides: copyOverrides,
             presentationTarget: .managedWindow
         ) {
-        case let .resolved(result, presentationId):
+        case .resolved(let result, let presentationId):
             return (result, presentationId)
-        case let .ready(coordinator):
+        case .ready(let coordinator):
             // Ownership-checked: a resumed stale frame must not wipe a successor
             // flow's registration.
             defer { if current?.coordinator === coordinator { current = nil } }

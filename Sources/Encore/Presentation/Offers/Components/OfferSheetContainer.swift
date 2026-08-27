@@ -8,14 +8,34 @@
 
 import SwiftUI
 
+enum OfferSheetPresentationHost {
+    case managedWindow(SDUIPresentationStyle)
+    case viewController
+
+    var contentPresentationStyle: SDUIPresentationStyle {
+        switch self {
+        case .managedWindow(let presentationStyle): return presentationStyle
+        case .viewController: return .fullScreenCover
+        }
+    }
+
+    var rendersContentDirectly: Bool {
+        switch self {
+        case .managedWindow(.sheet): return false
+        case .managedWindow(.fullScreenCover), .viewController: return true
+        }
+    }
+
+}
+
 /// Container view that hosts the offer sheet presentation flow.
 ///
 /// Manages transitions between:
 /// - Offers view (carousel of available offers)
 /// - Credit claimed view (success confirmation)
 ///
-/// This is a pure SwiftUI view with no UIKit dependencies. The UIKit window
-/// management is handled by `PresentationWindow`.
+/// This is a pure SwiftUI view with no UIKit dependencies. Its host owns the
+/// surrounding window or view-controller navigation.
 @available(iOS 16.0, *)
 struct OfferSheetContainer: View {
     
@@ -47,7 +67,8 @@ struct OfferSheetContainer: View {
     /// True when the IAP-first flow completed a real purchase before this
     /// sheet appeared — staged as the `.purchased` result floor.
     var initiallyPurchased: Bool = false
-    let presentationStyle: SDUIPresentationStyle
+    let presentationHost: OfferSheetPresentationHost
+    let onDismissRequest: () -> Void
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
     
     @State private var presentationState: PresentationState?
@@ -75,7 +96,7 @@ struct OfferSheetContainer: View {
 
     @ViewBuilder
     private var presentationRoot: some View {
-        if presentationStyle == .fullScreenCover {
+        if presentationHost.rendersContentDirectly {
             if let presentationState {
                 presentationContent(for: presentationState)
             } else {
@@ -108,9 +129,16 @@ struct OfferSheetContainer: View {
                 offerContext: offerContext,
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
-                presentationStyle: presentationStyle,
+                presentationHost: presentationHost,
                 onDismiss: {
-                    presentationState = nil
+                    switch presentationHost {
+                    case .managedWindow(.sheet):
+                        presentationState = nil
+                    case .managedWindow(.fullScreenCover):
+                        break
+                    case .viewController:
+                        onDismissRequest()
+                    }
                 },
                 onCompletion: { result in
                     handleOfferSheetCompletion(result)

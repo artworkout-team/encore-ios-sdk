@@ -8,7 +8,7 @@ import UIKit
 import Combine
 
 /// Centralized app lifecycle event source. Emits events via publishers.
-/// Handlers are @MainActor isolated to safely access UI state (PresentationWindow).
+/// Handlers are @MainActor isolated to safely access offer presentation state.
 /// UIKit delivers these notifications on main thread, so no actual hop occurs.
 internal final class AppLifecycle {
     
@@ -34,7 +34,7 @@ internal final class AppLifecycle {
     }
     
     // MARK: - Handlers (Emit events + track analytics)
-    // @MainActor: Safe access to PresentationWindow. UIKit delivers on main, so no hop.
+    // @MainActor: Safe access to OfferSheetCoordinator. UIKit delivers on main, so no hop.
     
     @MainActor @objc private func handleForeground() {
         didForeground.send()
@@ -44,14 +44,14 @@ internal final class AppLifecycle {
     @MainActor @objc private func handleBackground() {
         didBackground.send()
         analyticsClient?.track(
-            AppBackgroundedEvent(appBundleId: appBundleId, offerSheetVisible: PresentationWindow.isPresented)
+            AppBackgroundedEvent(appBundleId: appBundleId, offerSheetVisible: OfferSheetCoordinator.isVisible)
         )
     }
     
     @MainActor @objc private func handleTermination() {
         willTerminate.send()
         analyticsClient?.track(
-            AppTerminatedEvent(appBundleId: appBundleId, offerSheetVisible: PresentationWindow.isPresented)
+            AppTerminatedEvent(appBundleId: appBundleId, offerSheetVisible: OfferSheetCoordinator.isVisible)
         )
     }
 }

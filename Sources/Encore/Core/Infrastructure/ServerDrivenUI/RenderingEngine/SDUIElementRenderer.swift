@@ -1054,11 +1054,11 @@ private struct SDUISemanticScrollViewRenderer: View {
     @ViewBuilder
     private func scrollView(contentMargin: CGFloat?, viewportWidth: CGFloat?) -> some View {
         let scrollView = ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
-            scrollContent(centeredPadding: usesCenteredGeometry ? contentMargin : nil)
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
                 .environment(\.sduiCarouselViewportWidth, viewportWidth)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyContentMargin(usesCenteredGeometry ? nil : contentMargin, axis: axis)
+        .applyContentMargin(contentMargin, axis: axis)
         .scrollClipDisabled(true)
 
         if hasScrollTarget {
@@ -1072,16 +1072,6 @@ private struct SDUISemanticScrollViewRenderer: View {
                 }
         } else {
             scrollView
-        }
-    }
-
-    @ViewBuilder
-    private func scrollContent(centeredPadding: CGFloat?) -> some View {
-        if let centeredPadding {
-            SDUIElementRenderer(element: config.content, context: context, offer: offer)
-                .padding(.horizontal, centeredPadding)
-        } else {
-            SDUIElementRenderer(element: config.content, context: context, offer: offer)
         }
     }
 

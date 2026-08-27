@@ -641,18 +641,6 @@ internal final class OfferSheetCoordinator {
                 return
             }
 
-            if case .presentingViewController(let box) = active.phase,
-               let transitionCoordinator = box.value?.transitionCoordinator
-            {
-                let didScheduleCompletion = transitionCoordinator.animate(alongsideTransition: nil) { [self] _ in
-                    if Self.current?.coordinator === self {
-                        Self.current = ActivePresentation(coordinator: self, phase: .finished)
-                    }
-                    finish()
-                }
-                if didScheduleCompletion { return }
-            }
-
             Self.current = ActivePresentation(coordinator: self, phase: .finished)
         }
 

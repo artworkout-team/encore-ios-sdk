@@ -28,8 +28,15 @@ enum OfferSheetPresentationHost {
 
     var completesOnDismissRequest: Bool {
         switch self {
-        case .managedWindow(.fullScreenCover): return true
-        case .managedWindow(.sheet), .viewController: return false
+        case .managedWindow(.fullScreenCover), .viewController: return true
+        case .managedWindow(.sheet): return false
+        }
+    }
+
+    var requestsHostDismissalAfterCompletion: Bool {
+        switch self {
+        case .viewController: return true
+        case .managedWindow: return false
         }
     }
 }

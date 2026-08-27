@@ -10,7 +10,8 @@ final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
     }
 
     func requestDismissal() {
-        if let navigationController, navigationController.topViewController === self {
+        if let navigationController {
+            guard navigationController.topViewController === self else { return }
             if navigationController.viewControllers.count > 1 {
                 navigationController.popViewController(animated: true)
             } else if navigationController.presentingViewController != nil {
@@ -23,8 +24,6 @@ final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
 
         if presentingViewController != nil {
             dismiss(animated: true)
-        } else {
-            Logger.warn(.presentation, "Host-owned offer controller is not currently pushed or presented")
         }
     }
 }

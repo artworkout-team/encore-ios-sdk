@@ -242,6 +242,9 @@ struct OfferSheetView: View {
     ) {
         if presentationHost.completesOnDismissRequest {
             completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
+            if presentationHost.requestsHostDismissalAfterCompletion {
+                onDismiss()
+            }
         } else {
             onDismiss()
         }

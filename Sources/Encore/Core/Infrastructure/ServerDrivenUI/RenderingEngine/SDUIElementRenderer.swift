@@ -974,7 +974,18 @@ struct SDUIElementRenderer: View {
 /// drag, so swipes continue to belong to the carousel.
 @available(iOS 17.0, *)
 private struct SDUICarouselButtonStyle: PrimitiveButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
+    typealias Body = SDUICarouselButtonBody
+
+    func makeBody(configuration: Configuration) -> SDUICarouselButtonBody {
+        SDUICarouselButtonBody(configuration: configuration)
+    }
+}
+
+@available(iOS 17.0, *)
+private struct SDUICarouselButtonBody: View {
+    let configuration: PrimitiveButtonStyleConfiguration
+
+    var body: some View {
         configuration.label
             .contentShape(Rectangle())
             .onTapGesture {

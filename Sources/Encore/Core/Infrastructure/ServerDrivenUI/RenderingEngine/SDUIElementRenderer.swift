@@ -747,15 +747,51 @@ struct SDUIElementRenderer: View {
         let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
         let centeredIndex = context.focusedIndex ?? 0
         return ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
+            renderOfferItem(config.itemTemplate, offer: offerItem, index: index)
+                .background {
+                    GeometryReader { geometryProxy in
+                        Color.clear.preference(
+                            key: SDUIOfferCenterPreferenceKey.self,
+                            value: [index: geometryProxy.frame(in: .global).midX]
+                        )
+                    }
+                    .allowsHitTesting(false)
+                }
+                .id(index)
+                .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
+                .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
+        }
+    }
+
+    @ViewBuilder
+    private func renderOfferItem(_ template: SDUIElement, offer: Offer, index: Int) -> some View {
+        if case let .button(config) = template, config.action.type == .selectOffer {
+            Button {
+                context.trackButtonTap(actionType: config.action.type)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    context.selectOffer(offer, primaryKey: config.action.targetKey ?? "selectedOfferId")
+                }
+            } label: {
+                SDUIElementRenderer(
+                    element: config.content,
+                    context: context,
+                    offer: offer,
+                    isCurrentPage: context.focusedIndex == index
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(config.disabled ?? false)
+            .modifier(SDUIStyleModifier(style: config.style))
+            .contentShape(Rectangle())
+        } else {
             SDUIElementRenderer(
-                element: config.itemTemplate,
+                element: template,
                 context: context,
-                offer: offerItem,
+                offer: offer,
                 isCurrentPage: context.focusedIndex == index
             )
-            .id(index)
-            .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
-            .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
         }
     }
 
@@ -943,6 +979,14 @@ struct SDUIElementRenderer: View {
 
 // MARK: - Scroll View Renderer
 
+private struct SDUIOfferCenterPreferenceKey: PreferenceKey {
+    static let defaultValue: [Int: CGFloat] = [:]
+
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
 /// Renders an SDUI scroll view while adapting centered carousels to the actual
 /// viewport. A centered fixed-width carousel needs enough leading/trailing
 /// content margin to place its first and last cards at the viewport center.
@@ -953,6 +997,8 @@ private struct SDUIScrollViewRenderer: View {
     let offer: Offer?
 
     @State private var scrollPosition: Int?
+    @State private var programmaticScrollTarget: Int?
+    @State private var userDrivenSelection: Int?
 
     private var axis: Axis.Set {
         config.axis?.axis ?? .vertical
@@ -971,6 +1017,8 @@ private struct SDUIScrollViewRenderer: View {
         self.context = context
         self.offer = offer
         _scrollPosition = State(initialValue: context.focusedIndex)
+        _programmaticScrollTarget = State(initialValue: nil)
+        _userDrivenSelection = State(initialValue: nil)
     }
 
     private var resolvedContentMargin: CGFloat? {
@@ -991,6 +1039,12 @@ private struct SDUIScrollViewRenderer: View {
                     for: config,
                     viewportWidth: geometryProxy.size.width
                 ))
+                .onPreferenceChange(SDUIOfferCenterPreferenceKey.self) { offerCenters in
+                    updateVisibleOffer(
+                        from: offerCenters,
+                        viewportCenter: geometryProxy.frame(in: .global).midX
+                    )
+                }
             }
             .modifier(SDUIStyleModifier(style: config.style))
         } else {
@@ -1020,13 +1074,37 @@ private struct SDUIScrollViewRenderer: View {
     }
 
     private func animateContextSelection(_ newIndex: Int?) {
+        if userDrivenSelection == newIndex {
+            return
+        }
         guard let newIndex, newIndex != scrollPosition else { return }
         withAnimation(.easeInOut(duration: 0.35)) {
+            programmaticScrollTarget = newIndex
             scrollPosition = newIndex
         }
     }
 
+    private func updateVisibleOffer(from offerCenters: [Int: CGFloat], viewportCenter: CGFloat) {
+        guard programmaticScrollTarget == nil,
+              let visibleOffer = offerCenters.min(by: {
+                  abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
+              }),
+              visibleOffer.key != context.currentIndex
+        else { return }
+
+        userDrivenSelection = visibleOffer.key
+        context.currentIndex = visibleOffer.key
+        context.selectCenteredOffer(at: visibleOffer.key)
+        context.trackScroll(axis: scrollAxis, position: visibleOffer.key)
+    }
+
     private func commitScrolledPosition(_ newIndex: Int?) {
+        if programmaticScrollTarget == newIndex {
+            programmaticScrollTarget = nil
+        }
+        if userDrivenSelection == newIndex {
+            userDrivenSelection = nil
+        }
         guard let newIndex, newIndex != context.currentIndex else { return }
         let requestedIndex = context.focusedIndex
         context.currentIndex = newIndex

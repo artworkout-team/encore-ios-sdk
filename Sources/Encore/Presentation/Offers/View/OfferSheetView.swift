@@ -34,7 +34,7 @@ struct OfferSheetView: View {
     }
 
     private let initialStateOverride: String?
-    private let presentationStyle: SDUIPresentationStyle
+    private let presentationHost: OfferSheetPresentationHost
     private let onDismiss: () -> Void
 
     init(
@@ -46,12 +46,12 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
-        presentationStyle: SDUIPresentationStyle,
+        presentationHost: OfferSheetPresentationHost,
         onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
-        self.presentationStyle = presentationStyle
+        self.presentationHost = presentationHost
         self.onDismiss = onDismiss
         config = sduiConfigManager?.layout(for: offerContext.useCase)
         variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
@@ -158,7 +158,7 @@ struct OfferSheetView: View {
             onClose: {
                 viewModel.completionHandler.stageDismissal(.userTappedClose)
                 Self.requestDismissal(
-                    presentationStyle: presentationStyle,
+                    presentationHost: presentationHost,
                     completionHandler: viewModel.completionHandler,
                     onDismiss: onDismiss
                 )
@@ -183,7 +183,7 @@ struct OfferSheetView: View {
         // false` forces the bleed and lets the variant manage its own insets.
         .modifier(SDUIRootSafeAreaModifier(
             respectsSafeArea: loadedConfig.respectsSafeArea ?? true,
-            presentationStyle: loadedConfig.presentationStyle ?? .default
+            presentationStyle: presentationHost.contentPresentationStyle
         ))
         // Expose the active Appearance to ViewModifiers (e.g. SDUIBackgroundModifier)
         // so `{"appearance": "accent"}` in variant JSON resolves to the per-app brand color.
@@ -222,7 +222,7 @@ struct OfferSheetView: View {
         viewModel.bind(sduiContext: sduiContext) { [weak viewModel] in
             guard let completionHandler = viewModel?.completionHandler else { return }
             Self.requestDismissal(
-                presentationStyle: presentationStyle,
+                presentationHost: presentationHost,
                 completionHandler: completionHandler,
                 onDismiss: onDismiss
             )
@@ -236,11 +236,11 @@ struct OfferSheetView: View {
     }
 
     private static func requestDismissal(
-        presentationStyle: SDUIPresentationStyle,
+        presentationHost: OfferSheetPresentationHost,
         completionHandler: SheetDismissHandler,
         onDismiss: () -> Void
     ) {
-        if presentationStyle == .fullScreenCover {
+        if presentationHost.completesOnDismissRequest {
             completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
         } else {
             onDismiss()

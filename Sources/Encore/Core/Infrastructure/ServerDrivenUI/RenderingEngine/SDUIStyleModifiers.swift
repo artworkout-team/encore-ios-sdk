@@ -22,7 +22,6 @@ struct SDUIStyleModifier: ViewModifier {
             .modifier(SDUIFrameModifier(frame: style?.frame))
             .modifier(SDUIFixedSizeModifier(fixedSize: style?.fixedSize))
             .modifier(SDUIClippedModifier(clipped: style?.clipped))
-            .modifier(SDUIBackgroundElementModifier(element: style?.backgroundElement))
             // Fill + corner-radius clip + shadow composed together so the drop
             // shadow is cast by the filled rounded SHAPE (behind the content,
             // outside the clip) and never clipped into a hard rectangle.
@@ -37,7 +36,6 @@ struct SDUIStyleModifier: ViewModifier {
             .modifier(SDUIInnerShadowModifier(innerShadow: style?.innerShadow, cornerRadius: style?.resolvedCornerRadius ?? 0))
             .modifier(SDUIOpacityModifier(opacity: style?.opacity))
             .modifier(SDUIClipShapeModifier(clipShape: style?.clipShape))
-            .modifier(SDUIOverlayElementModifier(element: style?.overlay))
             .modifier(SDUISafeAreaModifier(ignoresSafeArea: style?.ignoresSafeArea))
             .modifier(SDUILayoutPriorityModifier(priority: style?.layoutPriority))
             // Transforms applied last — after frame/background/overlay resolve —
@@ -501,18 +499,42 @@ struct SDUIGradientBorderModifier: ViewModifier {
     }
 }
 
-/// Scroll-driven transform. Uses `.scrollTransition(.interactive)` so the
-/// element interpolates between the configured off-center extreme and identity
-/// (centered) as it scrolls through the viewport. `phase.value` is -1 at the
-/// leading edge, 0 at center, +1 at the trailing edge; we use its magnitude so
-/// both sides converge to identity at center. No-op when no transition is set.
+/// Carousel cards derive a continuous phase from their frame in the horizontal
+/// scroll-view coordinate space. Other scroll-transition elements keep
+/// SwiftUI's native viewport-driven interactive phase.
 @available(iOS 17.0, *)
 struct SDUIScrollTransitionModifier: ViewModifier {
     let transition: SDUIScrollTransition?
 
+    @Environment(\.sduiCarouselViewportWidth) private var carouselViewportWidth
+
     @ViewBuilder
     func body(content: Content) -> some View {
-        if let t = transition {
+        if let transition, let carouselViewportWidth {
+            content.visualEffect { view, geometryProxy in
+                view
+                    .scaleEffect(Self.scale(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+                    .opacity(Self.opacity(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+                    .rotationEffect(.degrees(Self.rotation(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    )))
+                    .offset(y: Self.yOffset(
+                        transition: transition,
+                        frame: geometryProxy.frame(in: .scrollView(axis: .horizontal)),
+                        viewportWidth: carouselViewportWidth
+                    ))
+            }
+        } else if let transition {
             // Single trailing expression (no intermediate `let`s / explicit
             // `return`): a multi-statement closure that returns the opaque
             // `some VisualEffect` fails return-type inference on stricter
@@ -520,14 +542,56 @@ struct SDUIScrollTransitionModifier: ViewModifier {
             // annotated for an opaque type. `mag` = 0 centered → 1 at extreme.
             content.scrollTransition(.interactive) { view, phase in
                 view
-                    .scaleEffect(1 - (1 - Double(t.scale ?? 1)) * min(1.0, abs(phase.value)))
-                    .opacity(1 - (1 - Double(t.opacity ?? 1)) * min(1.0, abs(phase.value)))
-                    .rotationEffect(.degrees(Double(t.rotation ?? 0) * phase.value))
-                    .offset(y: Double(t.yOffset ?? 0) * min(1.0, abs(phase.value)))
+                    .scaleEffect(1 - (1 - Double(transition.scale ?? 1)) * min(1.0, abs(phase.value)))
+                    .opacity(1 - (1 - Double(transition.opacity ?? 1)) * min(1.0, abs(phase.value)))
+                    .rotationEffect(.degrees(Double(transition.rotation ?? 0) * phase.value))
+                    .offset(y: Double(transition.yOffset ?? 0) * min(1.0, abs(phase.value)))
             }
         } else {
             content
         }
+    }
+
+    private nonisolated static func phase(frame: CGRect, viewportWidth: CGFloat) -> Double {
+        guard frame.width > 0 else { return 0 }
+        let position = Double(frame.midX - viewportWidth / 2) / Double(frame.width)
+        return min(1, max(-1, position))
+    }
+
+    private nonisolated static func magnitude(frame: CGRect, viewportWidth: CGFloat) -> Double {
+        abs(phase(frame: frame, viewportWidth: viewportWidth))
+    }
+
+    private nonisolated static func scale(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        1 - (1 - Double(transition.scale ?? 1)) * magnitude(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func opacity(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        1 - (1 - Double(transition.opacity ?? 1)) * magnitude(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func rotation(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        Double(transition.rotation ?? 0) * phase(frame: frame, viewportWidth: viewportWidth)
+    }
+
+    private nonisolated static func yOffset(
+        transition: SDUIScrollTransition,
+        frame: CGRect,
+        viewportWidth: CGFloat
+    ) -> Double {
+        Double(transition.yOffset ?? 0) * magnitude(frame: frame, viewportWidth: viewportWidth)
     }
 }
 
@@ -602,43 +666,6 @@ struct SDUIScrollFadeModifier: ViewModifier {
     }
 }
 
-/// Layers an SDUI sub-element ABOVE the content. Renders through
-/// `SDUIElementRenderer` using the context + row offer from the environment.
-@available(iOS 17.0, *)
-struct SDUIOverlayElementModifier: ViewModifier {
-    let element: SDUIElement?
-    @Environment(\.sduiRenderEnvironment) private var renderEnv
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let element = element, let context = renderEnv.context {
-            content.overlay(
-                SDUIElementRenderer(element: element, context: context, offer: renderEnv.offer)
-            )
-        } else {
-            content
-        }
-    }
-}
-
-/// Layers an SDUI sub-element BEHIND the content.
-@available(iOS 17.0, *)
-struct SDUIBackgroundElementModifier: ViewModifier {
-    let element: SDUIElement?
-    @Environment(\.sduiRenderEnvironment) private var renderEnv
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if let element = element, let context = renderEnv.context {
-            content.background(
-                SDUIElementRenderer(element: element, context: context, offer: renderEnv.offer)
-            )
-        } else {
-            content
-        }
-    }
-}
-
 // MARK: - ScrollView Extensions
 
 @available(iOS 17.0, *)
@@ -648,7 +675,7 @@ extension View {
         if let behavior = behavior {
             switch behavior {
             case .viewAligned:
-                self.scrollTargetBehavior(.viewAligned)
+                self.scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             case .paging:
                 self.scrollTargetBehavior(.paging)
             }
@@ -658,12 +685,12 @@ extension View {
     }
     
     @ViewBuilder
-    func applyContentMargins(_ margins: SDUIPadding?, axis: Axis.Set) -> some View {
-        if let margins = margins {
+    func applyContentMargin(_ margin: CGFloat?, axis: Axis.Set) -> some View {
+        if let margin = margin {
             if axis == .horizontal {
-                self.contentMargins(.horizontal, margins.edgeInsets.leading, for: .scrollContent)
+                self.contentMargins(.horizontal, margin, for: .scrollContent)
             } else {
-                self.contentMargins(.vertical, margins.edgeInsets.top, for: .scrollContent)
+                self.contentMargins(.vertical, margin, for: .scrollContent)
             }
         } else {
             self

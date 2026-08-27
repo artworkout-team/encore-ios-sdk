@@ -10,18 +10,16 @@ import SwiftUI
 
 // MARK: - Main Sheet View
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
-    @Environment(\.dismiss) var dismiss
 
-    /// SDUI config from SDUIConfigurationManager, resolved for this
-    /// presentation's use case (pre-fetched on identify for `.reduceChurn`, lazily
-    /// on first presentation for every other use case).
-    private var config: SDUIConfig? {
-        sduiConfigManager?.layout(for: viewModel.offerContext.useCase)
-    }
+    /// Immutable SDUI snapshot for this presentation. Resolving it once keeps
+    /// the recursive config tree out of repeated SwiftUI body evaluation and
+    /// prevents a late config arrival from replacing the visible hierarchy.
+    private let config: SDUIConfig?
+    private let variantId: String?
 
     /// Computed property to determine the preferred color scheme based on appearance mode
     private var preferredColorScheme: ColorScheme? {
@@ -36,6 +34,8 @@ struct OfferSheetView: View {
     }
 
     private let initialStateOverride: String?
+    private let presentationStyle: SDUIPresentationStyle
+    private let onDismiss: () -> Void
 
     init(
         offerResponse: OfferResponse,
@@ -46,9 +46,15 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
+        presentationStyle: SDUIPresentationStyle,
+        onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
+        self.presentationStyle = presentationStyle
+        self.onDismiss = onDismiss
+        config = sduiConfigManager?.layout(for: offerContext.useCase)
+        variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
 
         let handler = SheetDismissHandler(onCompletion: onCompletion, initiallyPurchased: initiallyPurchased)
         _viewModel = StateObject(wrappedValue: OfferSheetViewModel(
@@ -72,20 +78,10 @@ struct OfferSheetView: View {
 
     var body: some View {
         Group {
-            if let loadedConfig = config {
+            if #available(iOS 17.0, *), let loadedConfig = config {
                 sduiContent(loadedConfig)
             } else {
-                FallbackOfferSheetView(
-                    viewModel: viewModel,
-                    preferredColorScheme: preferredColorScheme,
-                    isClaimDisabled: !sduiContext.isClaimEnabled,
-                    onClose: {
-                        viewModel.completionHandler.stageDismissal(.userTappedClose)
-                        dismiss()
-                    },
-                    onSafariEvent: viewModel.handleSafariTrackingEvent,
-                    onSafariDismiss: viewModel.handleSafariDismiss
-                )
+                fallbackContent
             }
         }
         .overlay {
@@ -101,20 +97,12 @@ struct OfferSheetView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.verificationState != .idle)
-        .transaction { transaction in
-            // Only allow animations for the verification overlay —
-            // suppress inherited animations for SDUI content to prevent
-            // flash/opacity shifts on card selection and state transitions.
-            if viewModel.verificationState == .idle {
-                transaction.animation = nil
-            }
-        }
         .onAppear {
             setupContext()
 
             // Set variant metadata for analytics
             viewModel.setVariantMetadata(
-                variantId: sduiConfigManager?.variantId(for: viewModel.offerContext.useCase),
+                variantId: variantId,
                 context: sduiContext
             )
 
@@ -135,7 +123,8 @@ struct OfferSheetView: View {
 
             // Prefill email from developer-provided user attributes if not already set
             if sduiContext.values["email"]?.isEmpty != false,
-               let email = entitlementsManager?.userAttributes.email, !email.isEmpty {
+               let email = entitlementsManager?.userAttributes.email, !email.isEmpty
+            {
                 sduiContext.values["email"] = email
             }
 
@@ -161,8 +150,27 @@ struct OfferSheetView: View {
         }
     }
 
+    private var fallbackContent: some View {
+        FallbackOfferSheetView(
+            viewModel: viewModel,
+            preferredColorScheme: preferredColorScheme,
+            isClaimDisabled: !sduiContext.isClaimEnabled,
+            onClose: {
+                viewModel.completionHandler.stageDismissal(.userTappedClose)
+                Self.requestDismissal(
+                    presentationStyle: presentationStyle,
+                    completionHandler: viewModel.completionHandler,
+                    onDismiss: onDismiss
+                )
+            },
+            onSafariEvent: viewModel.handleSafariTrackingEvent,
+            onSafariDismiss: viewModel.handleSafariDismiss
+        )
+    }
+
     // MARK: - SDUI Content
 
+    @available(iOS 17.0, *)
     @ViewBuilder
     private func sduiContent(_ loadedConfig: SDUIConfig) -> some View {
         ZStack(alignment: .top) {
@@ -180,7 +188,7 @@ struct OfferSheetView: View {
         ))
         // Expose the active Appearance to ViewModifiers (e.g. SDUIBackgroundModifier)
         // so `{"appearance": "accent"}` in variant JSON resolves to the per-app brand color.
-        .environment(\.sduiAppearance, Appearance(from: sduiContext.offerContext.uiValues))
+        .environment(\.sduiAppearance, sduiContext.appearance)
         .presentationDetents(detentsForCurrentState(loadedConfig))
         .applyCornerRadius(loadedConfig.cornerRadius)
         .presentationDragIndicator(loadedConfig.showDragIndicator == true ? .visible : .hidden)
@@ -212,12 +220,31 @@ struct OfferSheetView: View {
 
     private func setupContext() {
         sduiContext.isClaimEnabled = Encore.shared.isClaimEnabled
-        viewModel.bind(sduiContext: sduiContext, dismiss: dismiss)
+        viewModel.bind(sduiContext: sduiContext) { [weak viewModel] in
+            guard let completionHandler = viewModel?.completionHandler else { return }
+            Self.requestDismissal(
+                presentationStyle: presentationStyle,
+                completionHandler: completionHandler,
+                onDismiss: onDismiss
+            )
+        }
         sduiContext.onAction = { [weak viewModel] action, offer in
             viewModel?.handleSDUIAction(action, offer: offer)
         }
         sduiContext.onOfferVisible = { [weak viewModel] index in
             viewModel?.trackOfferImpression(at: index)
+        }
+    }
+
+    private static func requestDismissal(
+        presentationStyle: SDUIPresentationStyle,
+        completionHandler: SheetDismissHandler,
+        onDismiss: () -> Void
+    ) {
+        if presentationStyle == .fullScreenCover {
+            completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
+        } else {
+            onDismiss()
         }
     }
 
@@ -246,6 +273,7 @@ struct OfferSheetView: View {
     /// a visible drag indicator — exact parity with the pre-redesign control
     /// behavior. Dismiss routes through `handleSafariDismiss()` to grant +
     /// transition.
+    @available(iOS 17.0, *)
     private func safariSheet(for wrapper: SafariURLWrapper) -> some View {
         SafariView(url: wrapper.url) { event in
             viewModel.handleSafariTrackingEvent(event)
@@ -263,6 +291,7 @@ struct OfferSheetView: View {
     /// Opt-in (`.inAppBrowser`) in-app Safari, presented via `.fullScreenCover`
     /// so the browser covers the whole screen (no detent / drag indicator).
     /// Dismiss still routes through `handleSafariDismiss()` to grant + transition.
+    @available(iOS 17.0, *)
     private func safariCover(for wrapper: SafariURLWrapper) -> some View {
         SafariView(url: wrapper.url) { event in
             viewModel.handleSafariTrackingEvent(event)

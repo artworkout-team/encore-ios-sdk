@@ -16,7 +16,7 @@ import SwiftUI
 ///
 /// This is a pure SwiftUI view with no UIKit dependencies. The UIKit window
 /// management is handled by `PresentationWindow`.
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct OfferSheetContainer: View {
     
     // MARK: - Presentation State
@@ -47,28 +47,22 @@ struct OfferSheetContainer: View {
     /// True when the IAP-first flow completed a real purchase before this
     /// sheet appeared — staged as the `.purchased` result floor.
     var initiallyPurchased: Bool = false
+    let presentationStyle: SDUIPresentationStyle
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
     
-    @State private var presentationState: PresentationState? = .offers
-    @Environment(\.dismiss) var dismiss
-    
-    /// Presentation style from cached server config, resolved for this
-    /// presentation's use case.
-    private var presentationStyle: SDUIPresentationStyle {
-        sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
-    }
+    @State private var presentationState: PresentationState?
     
     // MARK: - Body
     
     var body: some View {
-        Color.clear
-            .modifier(PresentationStyleModifier(
-                presentationStyle: presentationStyle,
-                presentationState: $presentationState,
-                content: { state in
-                    presentationContent(for: state)
-                }
-            ))
+        presentationRoot
+            .onAppear {
+                // iOS 17 does not present a sheet whose item is already
+                // non-nil before the hosting view joins a window. Trigger the
+                // first presentation only after the container is attached.
+                guard presentationState == nil else { return }
+                presentationState = .offers
+            }
             .onDisappear {
                 // Coordinator's complete() owns cleanup.
                 #if DEBUG
@@ -76,6 +70,26 @@ struct OfferSheetContainer: View {
                     Logger.warn(.presentation, "Window still present after onDisappear")
                 }
                 #endif
+            }
+    }
+
+    @ViewBuilder
+    private var presentationRoot: some View {
+        if presentationStyle == .fullScreenCover {
+            if let presentationState {
+                presentationContent(for: presentationState)
+            } else {
+                Color.clear
+            }
+        } else {
+            sheetContainer
+        }
+    }
+
+    private var sheetContainer: some View {
+        Color.clear
+            .sheet(item: $presentationState) { state in
+                presentationContent(for: state)
             }
     }
     
@@ -94,6 +108,10 @@ struct OfferSheetContainer: View {
                 offerContext: offerContext,
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
+                presentationStyle: presentationStyle,
+                onDismiss: {
+                    presentationState = nil
+                },
                 onCompletion: { result in
                     handleOfferSheetCompletion(result)
                 }
@@ -114,8 +132,8 @@ struct OfferSheetContainer: View {
             }
             .presentationDetents([.fraction(0.32)])
             .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(OfferSheetStyles.cornerRadius)
-            .presentationBackground(OfferSheetStyles.backgroundColor)
+            .compatiblePresentationCornerRadius(OfferSheetStyles.cornerRadius)
+            .compatiblePresentationBackground(OfferSheetStyles.backgroundColor)
         }
     }
     
@@ -123,11 +141,10 @@ struct OfferSheetContainer: View {
     
     private func handleOfferSheetCompletion(_ result: Result<PresentationResult, EncoreError>) {
         onCompletion(result)
-        dismiss()
     }
     
-    private func handleCreditClaimedDismiss(result: Result<PresentationResult, EncoreError>) {
-        dismiss()
+    private func handleCreditClaimedDismiss(result _: Result<PresentationResult, EncoreError>) {
+        presentationState = nil
     }
 }
 
@@ -136,29 +153,4 @@ struct OfferSheetContainer: View {
 struct CreditData: Identifiable {
     let id = UUID()
     let amount: Double
-}
-
-// MARK: - Presentation Style Modifier
-
-/// A ViewModifier that conditionally presents content as either a sheet or fullScreenCover
-@available(iOS 17.0, *)
-struct PresentationStyleModifier<PresentationContent: View>: ViewModifier {
-    let presentationStyle: SDUIPresentationStyle
-    @Binding var presentationState: OfferSheetContainer.PresentationState?
-    let content: (OfferSheetContainer.PresentationState) -> PresentationContent
-    
-    func body(content baseContent: Content) -> some View {
-        switch presentationStyle {
-        case .sheet:
-            baseContent
-                .sheet(item: $presentationState) { state in
-                    self.content(state)
-                }
-        case .fullScreenCover:
-            baseContent
-                .fullScreenCover(item: $presentationState) { state in
-                    self.content(state)
-                }
-        }
-    }
 }

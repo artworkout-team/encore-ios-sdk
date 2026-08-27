@@ -199,6 +199,12 @@ struct OfferContext {
     /// Subtitle text from UI values
     var subtitleText: String? { uiValues?.subtitle }
     
+    /// Reward headline resolved with publisher overrides taking precedence.
+    var rewardHeadlineText: String? { allVariables["rewardHeadline"] }
+
+    /// Reward subheadline resolved with publisher overrides taking precedence.
+    var rewardSubheadlineText: String? { allVariables["rewardSubheadline"] }
+
     /// Accent color hex from UI values
     var accentColor: String? { uiValues?.accentColor }
     

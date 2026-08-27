@@ -46,15 +46,10 @@ struct OfferSheetContainer: View {
     /// True when the IAP-first flow completed a real purchase before this
     /// sheet appeared — staged as the `.purchased` result floor.
     var initiallyPurchased: Bool = false
+    let presentationStyle: SDUIPresentationStyle
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
 
     @State private var presentationState: PresentationState?
-
-    /// Presentation style from cached server config, resolved for this
-    /// presentation's use case.
-    private var presentationStyle: SDUIPresentationStyle {
-        sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
-    }
 
     // MARK: - Body
 

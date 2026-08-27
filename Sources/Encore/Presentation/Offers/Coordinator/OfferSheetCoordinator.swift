@@ -394,6 +394,7 @@ internal final class OfferSheetCoordinator {
         }
         Logger.info(.presentation, "Presenting offer sheet with \(response.offerCount) offers")
 
+        let presentationStyle = sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
         let containerView = OfferSheetContainer(
             offerResponse: response,
             userId: userId,
@@ -403,6 +404,7 @@ internal final class OfferSheetCoordinator {
             offerContext: offerContext,
             initialStateOverride: initialStateOverride,
             initiallyPurchased: initiallyPurchased,
+            presentationStyle: presentationStyle,
             onCompletion: { [weak self] result in
                 self?.complete(result)
             }
@@ -410,6 +412,7 @@ internal final class OfferSheetCoordinator {
 
         let window = PresentationWindow.present(
             containerView,
+            presentationStyle: presentationStyle,
             overrideUserInterfaceStyle: offerContext.appearanceMode.userInterfaceStyle
         ) { [weak self] in
             self?.complete(.success(.presented(dismissal: .dismissed)))

@@ -441,15 +441,26 @@ internal final class OfferSheetCoordinator {
         // This also handles the edge case where start() fails before setting current.
         guard let continuation else { return }
         self.continuation = nil
+        let presentationResult = Self.collapse(result)
 
         // Phase-based cleanup (only if this coordinator owns current)
         if let active = Self.current, active.coordinator === self {
             if case .loading(let task) = active.phase { task.cancel() }
-            if case .presenting = active.phase { PresentationWindow.cleanup() }
+
+            if case .presenting = active.phase {
+                PresentationWindow.cleanup(animated: true) { [self] in
+                    if Self.current?.coordinator === self {
+                        Self.current = ActivePresentation(coordinator: self, phase: .finished)
+                    }
+                    continuation.resume(returning: presentationResult)
+                }
+                return
+            }
+
             Self.current = ActivePresentation(coordinator: self, phase: .finished)
         }
 
-        continuation.resume(returning: Self.collapse(result))
+        continuation.resume(returning: presentationResult)
     }
 
     /// Failure → value mapping for the never-throw surface.

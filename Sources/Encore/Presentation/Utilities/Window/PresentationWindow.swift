@@ -195,23 +195,44 @@ enum PresentationWindow {
 
     // MARK: - Cleanup
 
-    /// Cleans up the presentation window after dismissal.
-    static func cleanup() {
+    /// Dismisses the presented hosting controller before removing its window.
+    /// Root-hosted sheets have already animated out through SwiftUI, so they
+    /// fall through to immediate teardown even when `animated` is true.
+    static func cleanup(animated: Bool = false, completion: (() -> Void)? = nil) {
         let handler = onDismissHandler
         let keyWindowToRestore = previousKeyWindow
-
-        hostingController?.dismiss(animated: false)
-        hostingController = nil
-        window?.resignKey()
-        window?.isHidden = true
-        window?.rootViewController = nil
-        window = nil
-        previousKeyWindow = nil
+        let hostingControllerToDismiss = hostingController
+        let windowToRemove = window
         onDismissHandler = nil
-        keyWindowToRestore?.makeKey()
 
-        // Fire handler after clearing state to prevent re-entrancy issues
-        handler?()
+        let finish = {
+            if hostingController === hostingControllerToDismiss {
+                hostingController = nil
+            }
+            if window === windowToRemove {
+                windowToRemove?.resignKey()
+                windowToRemove?.isHidden = true
+                windowToRemove?.rootViewController = nil
+                window = nil
+                previousKeyWindow = nil
+                keyWindowToRestore?.makeKey()
+            }
+
+            // Fire callbacks after clearing state to prevent re-entrancy.
+            handler?()
+            completion?()
+        }
+
+        guard animated,
+              let hostingControllerToDismiss,
+              hostingControllerToDismiss.presentingViewController != nil
+        else {
+            hostingControllerToDismiss?.dismiss(animated: false)
+            finish()
+            return
+        }
+
+        hostingControllerToDismiss.dismiss(animated: true, completion: finish)
     }
 
     #if DEBUG

@@ -107,6 +107,7 @@ struct OfferSheetContainer: View {
                 offerContext: offerContext,
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
+                presentationStyle: presentationStyle,
                 onDismiss: {
                     presentationState = nil
                 },

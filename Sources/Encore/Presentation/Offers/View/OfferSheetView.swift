@@ -34,6 +34,7 @@ struct OfferSheetView: View {
     }
 
     private let initialStateOverride: String?
+    private let presentationStyle: SDUIPresentationStyle
     private let onDismiss: () -> Void
 
     init(
@@ -45,10 +46,12 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
+        presentationStyle: SDUIPresentationStyle,
         onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
+        self.presentationStyle = presentationStyle
         self.onDismiss = onDismiss
         config = sduiConfigManager?.layout(for: offerContext.useCase)
         variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
@@ -154,7 +157,11 @@ struct OfferSheetView: View {
             isClaimDisabled: !sduiContext.isClaimEnabled,
             onClose: {
                 viewModel.completionHandler.stageDismissal(.userTappedClose)
-                onDismiss()
+                Self.requestDismissal(
+                    presentationStyle: presentationStyle,
+                    completionHandler: viewModel.completionHandler,
+                    onDismiss: onDismiss
+                )
             },
             onSafariEvent: viewModel.handleSafariTrackingEvent,
             onSafariDismiss: viewModel.handleSafariDismiss
@@ -212,12 +219,31 @@ struct OfferSheetView: View {
 
     private func setupContext() {
         sduiContext.isClaimEnabled = Encore.shared.isClaimEnabled
-        viewModel.bind(sduiContext: sduiContext, onDismiss: onDismiss)
+        viewModel.bind(sduiContext: sduiContext) { [weak viewModel] in
+            guard let completionHandler = viewModel?.completionHandler else { return }
+            Self.requestDismissal(
+                presentationStyle: presentationStyle,
+                completionHandler: completionHandler,
+                onDismiss: onDismiss
+            )
+        }
         sduiContext.onAction = { [weak viewModel] action, offer in
             viewModel?.handleSDUIAction(action, offer: offer)
         }
         sduiContext.onOfferVisible = { [weak viewModel] index in
             viewModel?.trackOfferImpression(at: index)
+        }
+    }
+
+    private static func requestDismissal(
+        presentationStyle: SDUIPresentationStyle,
+        completionHandler: SheetDismissHandler,
+        onDismiss: () -> Void
+    ) {
+        if presentationStyle == .fullScreenCover {
+            completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
+        } else {
+            onDismiss()
         }
     }
 

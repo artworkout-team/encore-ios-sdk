@@ -658,11 +658,7 @@ extension View {
         if let behavior = behavior {
             switch behavior {
             case .viewAligned:
-                if #available(iOS 18.0, *) {
-                    scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
-                } else {
-                    scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-                }
+                scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             case .paging:
                 scrollTargetBehavior(.paging)
             }

@@ -484,17 +484,29 @@ struct SDUIGradientBorderModifier: ViewModifier {
     }
 }
 
-/// Scroll-driven transform. Uses `.scrollTransition(.interactive)` so the
-/// element interpolates between the configured off-center extreme and identity
-/// (centered) as it scrolls through the viewport. `phase.value` is -1 at the
-/// leading edge, 0 at center, +1 at the trailing edge; we use its magnitude so
-/// both sides converge to identity at center. No-op when no transition is set.
+/// Carousel cards use their signed distance from the selected center so wide
+/// iPad viewports still render the adjacent-card coverflow treatment. Other
+/// scroll-transition elements keep SwiftUI's viewport-driven interactive phase.
 @available(iOS 17.0, *)
 struct SDUIScrollTransitionModifier: ViewModifier {
     let transition: SDUIScrollTransition?
 
+    @Environment(\.sduiCarouselRelativePosition) private var carouselRelativePosition
+    @Environment(\.sduiIsRTL) private var isRTL
+
     func body(content: Content) -> some View {
-        if let t = transition {
+        if let transition, let carouselRelativePosition {
+            let direction: Double = isRTL ? -1 : 1
+            let signedPosition = carouselRelativePosition * direction
+            let magnitude = min(1, abs(signedPosition))
+            let clampedPosition = min(1, max(-1, signedPosition))
+            content
+                .scaleEffect(1 - (1 - Double(transition.scale ?? 1)) * magnitude)
+                .opacity(1 - (1 - Double(transition.opacity ?? 1)) * magnitude)
+                .rotationEffect(.degrees(Double(transition.rotation ?? 0) * clampedPosition))
+                .offset(y: Double(transition.yOffset ?? 0) * magnitude)
+                .animation(.easeInOut(duration: 0.25), value: carouselRelativePosition)
+        } else if let transition {
             // Single trailing expression (no intermediate `let`s / explicit
             // `return`): a multi-statement closure that returns the opaque
             // `some VisualEffect` fails return-type inference on stricter
@@ -502,10 +514,10 @@ struct SDUIScrollTransitionModifier: ViewModifier {
             // annotated for an opaque type. `mag` = 0 centered → 1 at extreme.
             content.scrollTransition(.interactive) { view, phase in
                 view
-                    .scaleEffect(1 - (1 - Double(t.scale ?? 1)) * min(1.0, abs(phase.value)))
-                    .opacity(1 - (1 - Double(t.opacity ?? 1)) * min(1.0, abs(phase.value)))
-                    .rotationEffect(.degrees(Double(t.rotation ?? 0) * phase.value))
-                    .offset(y: Double(t.yOffset ?? 0) * min(1.0, abs(phase.value)))
+                    .scaleEffect(1 - (1 - Double(transition.scale ?? 1)) * min(1.0, abs(phase.value)))
+                    .opacity(1 - (1 - Double(transition.opacity ?? 1)) * min(1.0, abs(phase.value)))
+                    .rotationEffect(.degrees(Double(transition.rotation ?? 0) * phase.value))
+                    .offset(y: Double(transition.yOffset ?? 0) * min(1.0, abs(phase.value)))
             }
         } else {
             content

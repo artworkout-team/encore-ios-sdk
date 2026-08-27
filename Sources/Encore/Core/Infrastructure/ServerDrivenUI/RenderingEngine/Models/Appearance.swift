@@ -211,6 +211,10 @@ private struct SDUIColorValuesKey: EnvironmentKey {
 
 @available(iOS 17.0, *)
 extension EnvironmentValues {
+    var sduiIsRTL: Bool {
+        layoutDirection == .rightToLeft
+    }
+
     var sduiColorValues: [String: String] {
         get { self[SDUIColorValuesKey.self] }
         set { self[SDUIColorValuesKey.self] = newValue }
@@ -230,10 +234,23 @@ private struct SDUIScrollFadeDistanceKey: EnvironmentKey {
     static let defaultValue: Double = 0
 }
 
+/// Signed display-space distance from a carousel card to the centered card.
+/// Nil outside a carousel so ordinary `scrollTransition` elements keep using
+/// SwiftUI's viewport-driven interactive phase.
+@available(iOS 17.0, *)
+private struct SDUICarouselRelativePositionKey: EnvironmentKey {
+    static let defaultValue: Double? = nil
+}
+
 @available(iOS 17.0, *)
 extension EnvironmentValues {
     var sduiScrollFadeDistance: Double {
         get { self[SDUIScrollFadeDistanceKey.self] }
         set { self[SDUIScrollFadeDistanceKey.self] = newValue }
+    }
+
+    var sduiCarouselRelativePosition: Double? {
+        get { self[SDUICarouselRelativePositionKey.self] }
+        set { self[SDUICarouselRelativePositionKey.self] = newValue }
     }
 }

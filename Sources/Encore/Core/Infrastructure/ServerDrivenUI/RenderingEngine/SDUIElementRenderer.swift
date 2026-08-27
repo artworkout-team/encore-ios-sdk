@@ -760,6 +760,7 @@ struct SDUIElementRenderer: View {
                 .id(index)
                 .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
                 .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
+                .environment(\.sduiCarouselRelativePosition, Double(index - centeredIndex))
         }
     }
 

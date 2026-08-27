@@ -973,6 +973,7 @@ struct SDUIElementRenderer: View {
 /// it reaches `trigger()`; a primitive style owns the tap without taking over a
 /// drag, so swipes continue to belong to the carousel.
 @available(iOS 17.0, *)
+@MainActor
 private struct SDUICarouselButtonStyle: PrimitiveButtonStyle {
     typealias Body = SDUICarouselButtonBody
 
@@ -982,6 +983,7 @@ private struct SDUICarouselButtonStyle: PrimitiveButtonStyle {
 }
 
 @available(iOS 17.0, *)
+@MainActor
 private struct SDUICarouselButtonBody: View {
     let configuration: PrimitiveButtonStyleConfiguration
 

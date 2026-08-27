@@ -7,10 +7,10 @@
 import UIKit
 import SwiftUI
 
-/// Weak handle to the presentation window — structural evidence a `.presenting` phase is live.
-private final class WeakBox {
-    weak var value: UIWindow?
-    init(_ v: UIWindow) { value = v }
+/// Weak handle to the presentation host — structural evidence a visible phase is live.
+private final class WeakBox<Value: AnyObject> {
+    weak var value: Value?
+    init(_ value: Value) { self.value = value }
     #if DEBUG
     /// Dead box for tests: `value` starts nil.
     init() {}
@@ -26,8 +26,15 @@ internal final class OfferSheetCoordinator {
     private enum Phase {
         case loading(task: Task<Void, Never>)
         /// Carries the owned window — the liveness evidence the gate verifies.
-        case presenting(window: WeakBox)
+        case presentingWindow(window: WeakBox<UIWindow>)
+        /// Carries the host-owned controller while it is active.
+        case presentingViewController(viewController: WeakBox<UIViewController>)
         case finished
+    }
+
+    private enum PresentationTarget {
+        case managedWindow
+        case viewController
     }
 
     /// Single source of truth — nil means no active presentation.
@@ -38,7 +45,8 @@ internal final class OfferSheetCoordinator {
     }
 
     private static var current: ActivePresentation?
-    private var continuation: CheckedContinuation<PresentationResult, Never>?
+    private var resultHandler: ((PresentationResult) -> Void)?
+    private var viewControllerContinuation: CheckedContinuation<UIViewController?, Never>?
     private let presentationId: String
     internal let placementId: String
     /// Publisher-chosen label for this placement, or nil when the id was
@@ -51,15 +59,24 @@ internal final class OfferSheetCoordinator {
     internal let useCase: UseCase
     /// Publisher copy overrides for this presentation, keyed by template variable.
     private let copyOverrides: [String: String]
+    private let presentationTarget: PresentationTarget
 
     // MARK: - Init
 
-    private init(placementId: String, placementLabel: String? = nil, useCase: UseCase = .reduceChurn, copyOverrides: [String: String] = [:], presentationId: String = UUID().uuidString) {
+    private init(
+        placementId: String,
+        placementLabel: String? = nil,
+        useCase: UseCase = .reduceChurn,
+        copyOverrides: [String: String] = [:],
+        presentationId: String = UUID().uuidString,
+        presentationTarget: PresentationTarget = .managedWindow
+    ) {
         self.placementId = placementId
         self.placementLabel = placementLabel
         self.useCase = useCase
         self.copyOverrides = copyOverrides
         self.presentationId = presentationId
+        self.presentationTarget = presentationTarget
     }
 
     // MARK: - Entry Point
@@ -85,6 +102,67 @@ internal final class OfferSheetCoordinator {
         copyOverrides: [String: String] = [:]
     ) async -> PresentationResult {
         let (result, presentationId) = await presentCore(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides)
+        publish(
+            result,
+            placementId: placementId,
+            placementLabel: placementLabel,
+            presentationId: presentationId,
+            useCase: useCase
+        )
+        return result
+    }
+
+    /// Builds an offer controller for a host-owned navigation stack.
+    /// Returns nil for every pre-presentation abort and still delivers its result.
+    static func makeViewController(
+        placementId: String,
+        placementLabel: String? = nil,
+        useCase: UseCase = .reduceChurn,
+        copyOverrides: [String: String] = [:],
+        resume: @escaping @MainActor (PresentationResult) -> Void
+    ) async -> UIViewController? {
+        switch makeAttempt(
+            placementId: placementId,
+            placementLabel: placementLabel,
+            useCase: useCase,
+            copyOverrides: copyOverrides,
+            presentationTarget: .viewController
+        ) {
+        case .resolved(let result, let presentationId):
+            publish(
+                result,
+                placementId: placementId,
+                placementLabel: placementLabel,
+                presentationId: presentationId,
+                useCase: useCase
+            )
+            resume(result)
+            return nil
+
+        case .ready(let coordinator):
+            return await coordinator.buildViewController { result in
+                publish(
+                    result,
+                    placementId: placementId,
+                    placementLabel: placementLabel,
+                    presentationId: coordinator.presentationId,
+                    useCase: useCase
+                )
+                if current?.coordinator === coordinator {
+                    current = nil
+                }
+                resume(result)
+            }
+        }
+    }
+
+    private static func publish(
+        _ result: PresentationResult,
+        placementId: String,
+        placementLabel: String?,
+        presentationId: String,
+        useCase: UseCase
+    ) {
         // Single choke point for BOTH observation channels: every resolution
         // lands on `outcomes` AND ships as the terminal analytics record.
         // Outbox delivery so the record survives process death offline.
@@ -98,7 +176,6 @@ internal final class OfferSheetCoordinator {
             distinctId: EventEnvelope.resolveDistinctId()
         ))
         Encore.shared.yieldOutcome(.presentation(placementId: placementId, result: result))
-        return result
     }
 
     private static func presentCore(
@@ -107,6 +184,35 @@ internal final class OfferSheetCoordinator {
         useCase: UseCase,
         copyOverrides: [String: String]
     ) async -> (PresentationResult, presentationId: String) {
+        switch makeAttempt(
+            placementId: placementId,
+            placementLabel: placementLabel,
+            useCase: useCase,
+            copyOverrides: copyOverrides,
+            presentationTarget: .managedWindow
+        ) {
+        case .resolved(let result, let presentationId):
+            return (result, presentationId)
+        case .ready(let coordinator):
+            // Ownership-checked: a resumed stale frame must not wipe a successor
+            // flow's registration.
+            defer { if current?.coordinator === coordinator { current = nil } }
+            return (await coordinator.run(), coordinator.presentationId)
+        }
+    }
+
+    private enum Attempt {
+        case ready(OfferSheetCoordinator)
+        case resolved(PresentationResult, presentationId: String)
+    }
+
+    private static func makeAttempt(
+        placementId: String,
+        placementLabel: String?,
+        useCase: UseCase,
+        copyOverrides: [String: String],
+        presentationTarget: PresentationTarget
+    ) -> Attempt {
         // Resolved once for every gate event: the variant is a config-level
         // fact, known before any of them fire. Stays nil when remote config has
         // not resolved a variant for this use case.
@@ -129,7 +235,7 @@ internal final class OfferSheetCoordinator {
             let version = UIDevice.current.systemVersion
             Logger.debug("SwiftUI offers require iOS 16+. Current: \(version)")
             enqueueDiagnostic(.showAborted(reason: .unsupportedOS, placementId: placementLabel, distinctId: EventEnvelope.resolveDistinctId(), variantId: variantId, useCase: useCase, presentationId: presentationId, iosVersion: version))
-            return (.notPresented(.unsupportedOS), presentationId)
+            return .resolved(.notPresented(.unsupportedOS), presentationId: presentationId)
         }
 
         // Defensive: clean stale finished coordinator (should never happen with defer)
@@ -140,24 +246,38 @@ internal final class OfferSheetCoordinator {
 
         // Liveness guarantee: every flow resolves on a real event — its own
         // completion, window teardown, or reconciliation at the next present().
-        if let active = current, case .presenting(let box) = active.phase {
-            let structurallyLive = box.value.map { $0.windowScene != nil && !$0.isHidden } ?? false
+        if let active = current {
+            let structurallyLive: Bool?
+            switch active.phase {
+            case .loading, .finished:
+                structurallyLive = nil
+            case .presentingWindow(let box):
+                structurallyLive = box.value.map { $0.windowScene != nil && !$0.isHidden } ?? false
+            case .presentingViewController(let box):
+                structurallyLive = box.value.map {
+                    $0.viewIfLoaded?.window != nil
+                        || $0.navigationController != nil
+                        || $0.presentingViewController != nil
+                } ?? false
+            }
+            if let structurallyLive {
             #if DEBUG
-            let isLive = _livenessOverride ?? structurallyLive
+                let isLive = _livenessOverride ?? structurallyLive
             #else
-            let isLive = structurallyLive
+                let isLive = structurallyLive
             #endif
-            if !isLive {
-                Logger.warn(.presentation, "Dead presentation detected (window gone) — reconciling and continuing")
-                active.coordinator.complete(.success(.presented(dismissal: .interrupted)))
-                current = nil
+                if !isLive {
+                    Logger.warn(.presentation, "Dead presentation host detected — reconciling and continuing")
+                    active.coordinator.complete(.success(.presented(dismissal: .interrupted)))
+                    current = nil
+                }
             }
         }
 
         guard current == nil else {
             Logger.warn(.presentation, "Already presenting, ignoring duplicate request")
             enqueueDiagnostic(.showAborted(reason: .alreadyPresenting, placementId: placementLabel, distinctId: EventEnvelope.resolveDistinctId(), variantId: variantId, useCase: useCase, presentationId: presentationId))
-            return (.notPresented(.alreadyPresenting), presentationId)
+            return .resolved(.notPresented(.alreadyPresenting), presentationId: presentationId)
         }
 
         // NCL experiment intercept. Scoped to `.reduceChurn`: every other use case
@@ -173,17 +293,19 @@ internal final class OfferSheetCoordinator {
             // logged). Pre-trigger suppression, so it aborts rather than fails.
             Logger.info(.experiments, "Ghost Trigger - Control cohort, no UI shown")
             enqueueDiagnostic(.showAborted(reason: .experimentControl, placementId: placementLabel, distinctId: EventEnvelope.resolveDistinctId(), variantId: variantId, useCase: useCase, presentationId: presentationId))
-            return (.notPresented(.experimentControl), presentationId)
+            return .resolved(.notPresented(.experimentControl), presentationId: presentationId)
         case .proceed, .skipped:
             break
         }
 
-        let coordinator = OfferSheetCoordinator(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, presentationId: presentationId)
-        // Ownership-checked: a resumed stale frame must not wipe a successor
-        // flow's registration.
-        defer { if current?.coordinator === coordinator { current = nil } }
-
-        return (await coordinator.run(), presentationId)
+        return .ready(OfferSheetCoordinator(
+            placementId: placementId,
+            placementLabel: placementLabel,
+            useCase: useCase,
+            copyOverrides: copyOverrides,
+            presentationId: presentationId,
+            presentationTarget: presentationTarget
+        ))
     }
 
     // MARK: - Lifecycle
@@ -191,7 +313,21 @@ internal final class OfferSheetCoordinator {
     /// Bridges the coordinator lifecycle to async/await via a single continuation.
     private func run() async -> PresentationResult {
         await withCheckedContinuation { continuation in
-            self.continuation = continuation
+            self.resultHandler = { result in
+                continuation.resume(returning: result)
+            }
+            self.start()
+        }
+    }
+
+    /// Starts the normal loading pipeline but resolves once its controller is ready.
+    /// The terminal result is delivered later, after the host removes the controller.
+    private func buildViewController(
+        onCompletion: @escaping @MainActor (PresentationResult) -> Void
+    ) async -> UIViewController? {
+        await withCheckedContinuation { continuation in
+            self.resultHandler = onCompletion
+            self.viewControllerContinuation = continuation
             self.start()
         }
     }
@@ -387,14 +523,24 @@ internal final class OfferSheetCoordinator {
     @available(iOS 16.0, *)
     private func presentOfferSheet(response: OfferResponse, userId: String, offerContext: OfferContext, initialStateOverride: String?, initiallyPurchased: Bool = false) {
         // The flow may already have resolved — presenting now would leak a
-        // window nobody owns or tears down.
-        guard continuation != nil else {
+        // presentation host nobody owns or tears down.
+        guard resultHandler != nil else {
             Logger.warn(.presentation, "Skipping presentation — flow already resolved")
             return
         }
         Logger.info(.presentation, "Presenting offer sheet with \(response.offerCount) offers")
 
         let presentationStyle = sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
+        let presentationHost: OfferSheetPresentationHost
+        let dismissalRelay: OfferSheetViewControllerDismissalRelay?
+        switch presentationTarget {
+        case .managedWindow:
+            presentationHost = .managedWindow(presentationStyle)
+            dismissalRelay = nil
+        case .viewController:
+            presentationHost = .viewController
+            dismissalRelay = OfferSheetViewControllerDismissalRelay()
+        }
         let containerView = OfferSheetContainer(
             offerResponse: response,
             userId: userId,
@@ -404,24 +550,49 @@ internal final class OfferSheetCoordinator {
             offerContext: offerContext,
             initialStateOverride: initialStateOverride,
             initiallyPurchased: initiallyPurchased,
-            presentationStyle: presentationStyle,
+            presentationHost: presentationHost,
+            onDismissRequest: {
+                dismissalRelay?.requestDismissal()
+            },
             onCompletion: { [weak self] result in
                 self?.complete(result)
             }
         )
 
-        let window = PresentationWindow.present(
-            containerView,
-            presentationStyle: presentationStyle,
-            overrideUserInterfaceStyle: offerContext.appearanceMode.userInterfaceStyle
-        ) { [weak self] in
-            self?.complete(.success(.presented(dismissal: .dismissed)))
-        }
-        if let window {
-            Self.current = ActivePresentation(coordinator: self, phase: .presenting(window: WeakBox(window)))
-        } else {
-            Logger.error(.integration(.notConfigured), context: .presentOfferInitialization)
-            complete(.failure(.integration(.notConfigured)))
+        switch presentationTarget {
+        case .managedWindow:
+            let window = PresentationWindow.present(
+                containerView,
+                presentationStyle: presentationStyle,
+                overrideUserInterfaceStyle: offerContext.appearanceMode.userInterfaceStyle
+            ) { [weak self] in
+                self?.complete(.success(.presented(dismissal: .dismissed)))
+            }
+            if let window {
+                Self.current = ActivePresentation(
+                    coordinator: self,
+                    phase: .presentingWindow(window: WeakBox(window))
+                )
+            } else {
+                Logger.error(.integration(.notConfigured), context: .presentOfferInitialization)
+                complete(.failure(.integration(.notConfigured)))
+            }
+
+        case .viewController:
+            let viewController = OfferSheetViewController(rootView: containerView)
+            viewController.overrideUserInterfaceStyle = offerContext.appearanceMode.userInterfaceStyle
+            dismissalRelay?.viewController = viewController
+            Self.current = ActivePresentation(
+                coordinator: self,
+                phase: .presentingViewController(viewController: WeakBox(viewController))
+            )
+            guard let viewControllerContinuation else {
+                Logger.error(.integration(.notConfigured), context: .presentOfferInitialization)
+                complete(.failure(.integration(.notConfigured)))
+                return
+            }
+            self.viewControllerContinuation = nil
+            viewControllerContinuation.resume(returning: viewController)
         }
     }
 
@@ -430,29 +601,37 @@ internal final class OfferSheetCoordinator {
     /// Single completion path — idempotent.
     /// Handles cleanup based on current phase:
     /// - `.loading`: cancels in-flight task, no window to tear down
-    /// - `.presenting`: tears down the presentation window
+    /// - `.presentingWindow`: tears down the presentation window
+    /// - `.presentingViewController`: the host already owns controller removal
     /// - `.finished` / nil: no-op (already completed)
     ///
     /// Internal plumbing (dismiss handler, container, fetch) still speaks
     /// `Result`; this is the one boundary where failures collapse into
     /// `.notPresented` values so `present()` never throws.
     private func complete(_ result: Result<PresentationResult, EncoreError>) {
-        // Continuation is the idempotency guard — consumed exactly once.
+        // The handler is the idempotency guard — consumed exactly once.
         // This also handles the edge case where start() fails before setting current.
-        guard let continuation else { return }
-        self.continuation = nil
+        guard let resultHandler else { return }
+        self.resultHandler = nil
+        let pendingViewControllerContinuation = viewControllerContinuation
+        viewControllerContinuation = nil
         let presentationResult = Self.collapse(result)
+
+        let finish = {
+            pendingViewControllerContinuation?.resume(returning: nil)
+            resultHandler(presentationResult)
+        }
 
         // Phase-based cleanup (only if this coordinator owns current)
         if let active = Self.current, active.coordinator === self {
             if case .loading(let task) = active.phase { task.cancel() }
 
-            if case .presenting = active.phase {
+            if case .presentingWindow = active.phase {
                 PresentationWindow.cleanup(animated: true) { [self] in
                     if Self.current?.coordinator === self {
                         Self.current = ActivePresentation(coordinator: self, phase: .finished)
                     }
-                    continuation.resume(returning: presentationResult)
+                    finish()
                 }
                 return
             }
@@ -460,7 +639,7 @@ internal final class OfferSheetCoordinator {
             Self.current = ActivePresentation(coordinator: self, phase: .finished)
         }
 
-        continuation.resume(returning: presentationResult)
+        finish()
     }
 
     /// Failure → value mapping for the never-throw surface.
@@ -501,8 +680,21 @@ internal final class OfferSheetCoordinator {
         return true
     }
 
+    /// Whether offer UI is currently attached to a visible window.
+    static var isVisible: Bool {
+        guard let current else { return false }
+        switch current.phase {
+        case .loading, .finished:
+            return false
+        case .presentingWindow(let box):
+            return box.value.map { $0.windowScene != nil && !$0.isHidden } ?? false
+        case .presentingViewController(let box):
+            return box.value?.viewIfLoaded?.window != nil
+        }
+    }
+
     #if DEBUG
-    /// Overrides the `.presenting` liveness check — a real test-env UIWindow
+    /// Overrides the presentation-host liveness check — a real test-env UIWindow
     /// has `windowScene == nil`, so the structural check can't pass there.
     static var _livenessOverride: Bool?
 
@@ -513,17 +705,17 @@ internal final class OfferSheetCoordinator {
         current = ActivePresentation(coordinator: coordinator, phase: .loading(task: task))
     }
 
-    /// Force a `.presenting` phase whose window evidence is already dead.
+    /// Force a presenting-window phase whose window evidence is already dead.
     static func _forcePresentingDeadWindow() {
         let coordinator = OfferSheetCoordinator(placementId: "test_placement")
-        current = ActivePresentation(coordinator: coordinator, phase: .presenting(window: WeakBox()))
+        current = ActivePresentation(coordinator: coordinator, phase: .presentingWindow(window: WeakBox()))
     }
 
-    /// Force a `.presenting` phase the gate treats as live (via `_livenessOverride`).
+    /// Force a presenting-window phase the gate treats as live (via `_livenessOverride`).
     static func _forcePresentingLiveWindow() {
         _livenessOverride = true
         let coordinator = OfferSheetCoordinator(placementId: "test_placement")
-        current = ActivePresentation(coordinator: coordinator, phase: .presenting(window: WeakBox()))
+        current = ActivePresentation(coordinator: coordinator, phase: .presentingWindow(window: WeakBox()))
     }
 
     /// Force-clear all state for test isolation.

@@ -1036,26 +1036,22 @@ private struct SDUISemanticScrollViewRenderer: View {
         Group {
             if usesCenteredGeometry {
                 GeometryReader { geometryProxy in
-                    scrollView(
-                        contentMargin: SDUIScrollLayout.centeredContentMargin(
-                            for: config,
-                            viewportWidth: geometryProxy.size.width
-                        ),
+                    scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
+                        for: config,
                         viewportWidth: geometryProxy.size.width
-                    )
+                    ))
                 }
             } else {
-                scrollView(contentMargin: resolvedContentMargin, viewportWidth: nil)
+                scrollView(contentMargin: resolvedContentMargin)
             }
         }
         .modifier(SDUIStyleModifier(style: config.style))
     }
 
     @ViewBuilder
-    private func scrollView(contentMargin: CGFloat?, viewportWidth: CGFloat?) -> some View {
+    private func scrollView(contentMargin: CGFloat?) -> some View {
         let scrollView = ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
             SDUIElementRenderer(element: config.content, context: context, offer: offer)
-                .environment(\.sduiCarouselViewportWidth, viewportWidth)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(contentMargin, axis: axis)

@@ -996,8 +996,6 @@ private struct SDUIScrollViewRenderer: View {
     @ObservedObject var context: SDUIContext
     let offer: Offer?
 
-    @State private var scrollPosition: Int?
-    @State private var programmaticScrollTarget: Int?
     @State private var userDrivenSelection: Int?
 
     private var axis: Axis.Set {
@@ -1008,16 +1006,10 @@ private struct SDUIScrollViewRenderer: View {
         config.axis ?? .vertical
     }
 
-    private var hasScrollTarget: Bool {
-        SDUIElementRenderer.tracksCarouselPosition(config)
-    }
-
     init(config: SDUIScrollView, context: SDUIContext, offer: Offer?) {
         self.config = config
         self.context = context
         self.offer = offer
-        _scrollPosition = State(initialValue: context.focusedIndex)
-        _programmaticScrollTarget = State(initialValue: nil)
         _userDrivenSelection = State(initialValue: nil)
     }
 
@@ -1033,23 +1025,37 @@ private struct SDUIScrollViewRenderer: View {
     }
 
     var body: some View {
-        if usesCenteredGeometry {
-            GeometryReader { geometryProxy in
-                scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
-                    for: config,
-                    viewportWidth: geometryProxy.size.width
-                ))
-                .onPreferenceChange(SDUIOfferCenterPreferenceKey.self) { offerCenters in
-                    updateVisibleOffer(
-                        from: offerCenters,
-                        viewportCenter: geometryProxy.frame(in: .global).midX
-                    )
+        ScrollViewReader { scrollProxy in
+            Group {
+                if usesCenteredGeometry {
+                    GeometryReader { geometryProxy in
+                        scrollView(contentMargin: SDUIScrollLayout.centeredContentMargin(
+                            for: config,
+                            viewportWidth: geometryProxy.size.width
+                        ))
+                        .onPreferenceChange(SDUIOfferCenterPreferenceKey.self) { offerCenters in
+                            updateVisibleOffer(
+                                from: offerCenters,
+                                viewportCenter: geometryProxy.frame(in: .global).midX
+                            )
+                        }
+                    }
+                    .modifier(SDUIStyleModifier(style: config.style))
+                } else {
+                    scrollView(contentMargin: resolvedContentMargin)
+                        .modifier(SDUIStyleModifier(style: config.style))
                 }
             }
-            .modifier(SDUIStyleModifier(style: config.style))
-        } else {
-            scrollView(contentMargin: resolvedContentMargin)
-                .modifier(SDUIStyleModifier(style: config.style))
+            .onAppear {
+                scrollToContextSelection(using: scrollProxy, animated: false)
+            }
+            .onChange(of: context.focusedIndex) { _, newIndex in
+                if userDrivenSelection == newIndex {
+                    userDrivenSelection = nil
+                    return
+                }
+                scrollToContextSelection(using: scrollProxy, animated: true)
+            }
         }
     }
 
@@ -1059,59 +1065,32 @@ private struct SDUIScrollViewRenderer: View {
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
         .applyContentMargin(contentMargin, axis: axis)
-        .modifier(SDUICarouselPositionModifier(
-            position: $scrollPosition.animation(.easeInOut(duration: 0.35)),
-            alignment: config.scrollAlignment,
-            isEnabled: hasScrollTarget
-        ))
         .scrollClipDisabled(true)
-        .onChange(of: scrollPosition) { _, newIndex in
-            commitScrolledPosition(newIndex)
-        }
-        .onChange(of: context.focusedIndex) { _, newIndex in
-            animateContextSelection(newIndex)
-        }
     }
 
-    private func animateContextSelection(_ newIndex: Int?) {
-        if userDrivenSelection == newIndex {
-            return
+    private func scrollToContextSelection(using scrollProxy: ScrollViewProxy, animated: Bool) {
+        guard let index = context.focusedIndex else { return }
+        let scroll = {
+            scrollProxy.scrollTo(index, anchor: config.scrollAlignment?.unitPoint)
         }
-        guard let newIndex, newIndex != scrollPosition else { return }
-        withAnimation(.easeInOut(duration: 0.35)) {
-            programmaticScrollTarget = newIndex
-            scrollPosition = newIndex
+        if animated {
+            withAnimation(.easeInOut(duration: 0.35)) { scroll() }
+        } else {
+            scroll()
         }
     }
 
     private func updateVisibleOffer(from offerCenters: [Int: CGFloat], viewportCenter: CGFloat) {
-        guard programmaticScrollTarget == nil,
-              let visibleOffer = offerCenters.min(by: {
-                  abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
-              }),
-              visibleOffer.key != context.currentIndex
+        guard let visibleOffer = offerCenters.min(by: {
+            abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
+        }),
+            visibleOffer.key != context.currentIndex
         else { return }
 
         userDrivenSelection = visibleOffer.key
         context.currentIndex = visibleOffer.key
         context.selectCenteredOffer(at: visibleOffer.key)
         context.trackScroll(axis: scrollAxis, position: visibleOffer.key)
-    }
-
-    private func commitScrolledPosition(_ newIndex: Int?) {
-        if programmaticScrollTarget == newIndex {
-            programmaticScrollTarget = nil
-        }
-        if userDrivenSelection == newIndex {
-            userDrivenSelection = nil
-        }
-        guard let newIndex, newIndex != context.currentIndex else { return }
-        let requestedIndex = context.focusedIndex
-        context.currentIndex = newIndex
-        context.selectCenteredOffer(at: newIndex)
-        if newIndex != requestedIndex {
-            context.trackScroll(axis: scrollAxis, position: newIndex)
-        }
     }
 }
 
@@ -1145,35 +1124,6 @@ enum SDUIScrollLayout {
             return config.children.lazy.compactMap(fixedWidth(of:)).first
         default:
             return nil
-        }
-    }
-}
-
-// MARK: - Carousel Scroll Position
-
-/// Binds a carousel to view-local scroll state — and only for the scroll view
-/// that actually owns the carousel.
-///
-/// `SDUIContext.currentIndex` is committed selection state, not a suitable
-/// two-way ScrollView binding: publishing that same value back from the binding
-/// getter during a drag makes SwiftUI restore the old card before the gesture
-/// can settle. The renderer owns the live position instead, then commits it to
-/// the context from `onChange` after SwiftUI resolves a new centered target.
-///
-/// A variant may nest several scroll views around one carousel; only the scroll
-/// view with target behavior receives this modifier, so a page scroller cannot
-/// clear or overwrite the carousel position.
-@available(iOS 17.0, *)
-private struct SDUICarouselPositionModifier: ViewModifier {
-    @Binding var position: Int?
-    let alignment: SDUIScrollAlignment?
-    let isEnabled: Bool
-
-    func body(content: Content) -> some View {
-        if isEnabled {
-            content.scrollPosition(id: $position, anchor: alignment?.unitPoint)
-        } else {
-            content
         }
     }
 }

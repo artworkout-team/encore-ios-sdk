@@ -4,7 +4,7 @@
 
 import SwiftUI
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct VerificationPendingView: View {
     let isTimedOut: Bool
     let onRetry: () -> Void

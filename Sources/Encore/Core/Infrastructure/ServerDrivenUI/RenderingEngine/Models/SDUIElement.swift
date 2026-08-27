@@ -372,11 +372,27 @@ struct SDUIScrollView: Decodable {
     var contentMargins: SDUIPadding?
     /// Whether to use view-aligned scroll target behavior (for paging)
     var scrollTargetBehavior: SDUIScrollTargetBehavior?
+    /// Alignment of the selected target within the scroll viewport.
+    var scrollAlignment: SDUIScrollAlignment?
 }
 
 enum SDUIScrollTargetBehavior: String, Decodable {
     case viewAligned
     case paging
+}
+
+enum SDUIScrollAlignment: String, Decodable {
+    case leading
+    case center
+    case trailing
+
+    var unitPoint: UnitPoint {
+        switch self {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
 }
 
 // MARK: - Data Elements

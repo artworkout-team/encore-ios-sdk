@@ -70,15 +70,15 @@ enum SDUIAppearanceColor: String, Decodable {
 
 // MARK: - Appearance
 
-/// Resolved theme for the current app session. One instance per render of the
-/// SDUI tree. Built from the backend's `UIValues` at `OfferSheetView` render
+/// Resolved theme for the current app session. One immutable instance per
+/// presentation. Built from the backend's `UIValues` when the SDUI context
 /// time, with per-token fallbacks so partially-configured apps (or no remote
 /// config at all) still render correctly.
 ///
 /// Injected into the SwiftUI environment via `\.sduiAppearance` so any
 /// `ViewModifier` can resolve `SDUIColor.appearance(_)` without explicit
 /// plumbing.
-struct Appearance {
+final class Appearance: Equatable {
     let accent: Color
     let onAccent: Color
     let accentTitle: Color
@@ -89,6 +89,10 @@ struct Appearance {
     let border: Color
     let muted: Color
     let error: Color
+
+    static func == (lhs: Appearance, rhs: Appearance) -> Bool {
+        lhs === rhs
+    }
 
     /// Lookup — the *only* place the enum-to-stored-property mapping lives.
     /// Adding a token = add a case here.
@@ -151,12 +155,7 @@ struct Appearance {
         self.error = fallback.error
     }
 
-}
-
-// Memberwise init kept in an extension: declaring `init(from:)` above
-// suppresses Swift's synthesized memberwise init, and `.default` + tests
-// rely on the label-per-arg form.
-extension Appearance {
+    /// Explicit memberwise initializer used by `.default` and tests.
     init(
         accent: Color,
         onAccent: Color,
@@ -218,29 +217,6 @@ extension EnvironmentValues {
     }
 }
 
-/// SwiftUI environment carrying the active render `SDUIContext` and the
-/// current row `Offer`, so generic `ViewModifier`s can render sub-elements
-/// (`style.overlay`, `style.backgroundElement`) through `SDUIElementRenderer`.
-/// Set per element in the renderer's `body`.
-@available(iOS 17.0, *)
-struct SDUIRenderEnvironment {
-    weak var context: SDUIContext?
-    var offer: Offer?
-}
-
-@available(iOS 17.0, *)
-private struct SDUIRenderEnvironmentKey: EnvironmentKey {
-    static let defaultValue = SDUIRenderEnvironment()
-}
-
-@available(iOS 17.0, *)
-extension EnvironmentValues {
-    var sduiRenderEnvironment: SDUIRenderEnvironment {
-        get { self[SDUIRenderEnvironmentKey.self] }
-        set { self[SDUIRenderEnvironmentKey.self] = newValue }
-    }
-}
-
 /// How far the enclosing carousel card is from the centered card, as an integer
 /// distance (`abs(index - currentIndex)`). Set per card in `renderForEach` so
 /// descendant `scrollFade` layers (brand-color fill, checkmark badge) know
@@ -254,10 +230,22 @@ private struct SDUIScrollFadeDistanceKey: EnvironmentKey {
     static let defaultValue: Double = 0
 }
 
+/// Width of the carousel viewport. Nil outside a centered offer carousel so
+/// ordinary `scrollTransition` elements keep SwiftUI's native phase.
+@available(iOS 17.0, *)
+private struct SDUICarouselViewportWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
 @available(iOS 17.0, *)
 extension EnvironmentValues {
     var sduiScrollFadeDistance: Double {
         get { self[SDUIScrollFadeDistanceKey.self] }
         set { self[SDUIScrollFadeDistanceKey.self] = newValue }
+    }
+
+    var sduiCarouselViewportWidth: CGFloat? {
+        get { self[SDUICarouselViewportWidthKey.self] }
+        set { self[SDUICarouselViewportWidthKey.self] = newValue }
     }
 }

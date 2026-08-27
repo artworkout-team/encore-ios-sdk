@@ -5,13 +5,11 @@
 
 import SwiftUI
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 struct CreditClaimedView: View {
     let credit: CreditData
     let offerContext: OfferContext
     let onDismiss: () -> Void
-    
-    @Environment(\.dismiss) var dismiss
     
     /// Primary text color that adapts to system appearance
     private let primaryTextColor = Color(UIColor.label)
@@ -55,7 +53,7 @@ struct CreditClaimedView: View {
                 Spacer()
                 
                 Button {
-                    dismiss()
+                    onDismiss()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 14))

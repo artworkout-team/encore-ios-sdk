@@ -42,7 +42,7 @@ private struct PendingClaim {
 }
 
 @MainActor
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 class OfferSheetViewModel: ObservableObject {
     // MARK: - Published Properties
     
@@ -98,10 +98,11 @@ class OfferSheetViewModel: ObservableObject {
     /// already a non-owning edge).
     private weak var sduiContext: SDUIContext?
 
-    /// Captured from the view's `@Environment(\.dismiss)` so action handlers
-    /// can dismiss the sheet without routing through a view method (which
-    /// would require a strong struct-self capture).
-    private var dismiss: DismissAction?
+    /// Stable container-owned dismissal callback. Using SwiftUI's
+    /// `@Environment(\.dismiss)` here makes the offer view observe a
+    /// continuously-changing `DismissAction` on iOS 17, which can trap the
+    /// presentation in a root-view invalidation loop.
+    private var onDismiss: (() -> Void)?
 
     /// Lead payload stashed on submit; fires to the outbox only after IAP
     /// succeeds via `flushPendingLead`.
@@ -215,12 +216,12 @@ class OfferSheetViewModel: ObservableObject {
         subscribeToLifecycle()
     }
 
-    /// Register the SDUIContext and dismiss action. Action-handling closures
-    /// stored on the context capture `[weak self]` — no cycle to break on
-    /// deinit, so no deinit cleanup needed.
-    func bind(sduiContext: SDUIContext, dismiss: DismissAction) {
+    /// Register the SDUIContext and stable dismiss callback. Action-handling
+    /// closures stored on the context capture `[weak self]` — no cycle to
+    /// break on deinit, so no deinit cleanup needed.
+    func bind(sduiContext: SDUIContext, onDismiss: @escaping () -> Void) {
         self.sduiContext = sduiContext
-        self.dismiss = dismiss
+        self.onDismiss = onDismiss
     }
 
     /// Set variant metadata on both self and context
@@ -620,7 +621,7 @@ class OfferSheetViewModel: ObservableObject {
             // Staged funnel facts (e.g. a claim) ride along automatically;
             // this only records how the sheet ended.
             completionHandler.stageDismissal(.userTappedClose)
-            dismiss?()
+            onDismiss?()
         case .claimOffer:
             if let offer {
                 // Capture the post-claim state (if authored) before the claim
@@ -691,7 +692,7 @@ class OfferSheetViewModel: ObservableObject {
         if target == "close" {
             Logger.info("\(logPrefix) Closing sheet")
             completionHandler.stageDismissal(.dismissed)
-            dismiss?()
+            onDismiss?()
         } else {
             Logger.info("\(logPrefix) Transitioning to state: \(target)")
             sduiContext.setState(target)
@@ -841,7 +842,7 @@ class OfferSheetViewModel: ObservableObject {
 
 // MARK: - Analytics
 
-@available(iOS 17.0, *)
+@available(iOS 16.0, *)
 extension OfferSheetViewModel {
     
     // MARK: - Context & Tracking Helpers

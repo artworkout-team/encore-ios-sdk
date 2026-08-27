@@ -26,8 +26,43 @@ internal extension OfferContext.AppearanceMode {
 }
 
 @MainActor
-internal enum PresentationWindow {
+private final class PresentationHostingController<Content: View>: UIHostingController<Content> {
+    private let orientationMask: UIInterfaceOrientationMask
+    private let preferredOrientation: UIInterfaceOrientation
+    private let allowsAutorotation: Bool
     
+    init(
+        rootView: Content,
+        orientationMask: UIInterfaceOrientationMask,
+        preferredOrientation: UIInterfaceOrientation,
+        allowsAutorotation: Bool
+    ) {
+        self.orientationMask = orientationMask
+        self.preferredOrientation = preferredOrientation
+        self.allowsAutorotation = allowsAutorotation
+        super.init(rootView: rootView)
+    }
+
+    @available(*, unavailable)
+    dynamic required init?(coder _: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        orientationMask
+    }
+
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        preferredOrientation
+    }
+
+    override var shouldAutorotate: Bool {
+        allowsAutorotation
+    }
+}
+
+@MainActor
+internal enum PresentationWindow {
     // MARK: - Window State
     
     /// The custom window used for presenting offer sheets.
@@ -36,6 +71,10 @@ internal enum PresentationWindow {
     /// The hosting controller for the presented SwiftUI view.
     private static var hostingController: UIViewController?
     
+    /// The host window restored after the Encore overlay closes. Weak so the
+    /// SDK never extends the host window's lifetime.
+    private weak static var previousKeyWindow: UIWindow?
+
     /// Called when the window is dismissed (cleanup, swipe-away, etc.)
     private static var onDismissHandler: (() -> Void)?
     
@@ -52,6 +91,7 @@ internal enum PresentationWindow {
     @discardableResult
     static func present<Content: View>(
         _ rootView: Content,
+        presentationStyle: SDUIPresentationStyle,
         overrideUserInterfaceStyle: UIUserInterfaceStyle = .unspecified,
         _ onDismiss: (() -> Void)? = nil
     ) -> UIWindow? {
@@ -80,40 +120,117 @@ internal enum PresentationWindow {
         // and ignore the SwiftUI environment — so an explicit `appearance_mode`
         // had no effect inside a host that pins its own style.
         newWindow.overrideUserInterfaceStyle = overrideUserInterfaceStyle
+        newWindow.frame = windowScene.coordinateSpace.bounds
         newWindow.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue + 1000)
         newWindow.backgroundColor = .clear
-        newWindow.rootViewController = UIViewController()
-        newWindow.isHidden = false
+
+        let sourceWindow = windowScene.windows.first(where: \.isKeyWindow)
+        let sourceRootViewController = sourceWindow?.rootViewController
+        let orientationMask = supportedInterfaceOrientationsFromInfoPlist()
+            ?? UIApplication.shared.delegate?.application?(
+                UIApplication.shared,
+                supportedInterfaceOrientationsFor: sourceWindow
+            )
+            ?? sourceRootViewController?.supportedInterfaceOrientations
+            ?? .all
+        let preferredOrientation = windowScene.interfaceOrientation
         
         // Create hosting controller
-        let hosting = UIHostingController(rootView: rootView)
+        let hosting = PresentationHostingController(
+            rootView: rootView,
+            orientationMask: orientationMask,
+            preferredOrientation: preferredOrientation,
+            allowsAutorotation: sourceRootViewController?.shouldAutorotate ?? true
+        )
         hosting.modalPresentationStyle = .overFullScreen
+        hosting.modalTransitionStyle = .coverVertical
         hosting.view.backgroundColor = .clear
+
+        // Sheets use SwiftUI's own presentation from a root-hosted container.
+        // Full-screen content is rendered directly by OfferSheetContainer and
+        // presented once through UIKit's cover-vertical modal transition.
+        let hostsDirectlyAtRoot = presentationStyle == .sheet
+
+        if hostsDirectlyAtRoot {
+            newWindow.rootViewController = hosting
+        } else {
+            let presentingController = UIViewController()
+            presentingController.view.backgroundColor = .clear
+            newWindow.rootViewController = presentingController
+        }
+
+        previousKeyWindow = sourceWindow
         
         // Store references
         window = newWindow
         hostingController = hosting
         
-        // Present
-        newWindow.rootViewController?.present(hosting, animated: true)
+        newWindow.makeKeyAndVisible()
+
+        if !hostsDirectlyAtRoot {
+            newWindow.rootViewController?.present(hosting, animated: true)
+        }
         return newWindow
+    }
+
+    private static func supportedInterfaceOrientationsFromInfoPlist() -> UIInterfaceOrientationMask? {
+        let idiomSuffix = UIDevice.current.userInterfaceIdiom == .pad ? "~ipad" : "~iphone"
+        let info = Bundle.main.infoDictionary
+        let orientationNames = info?["UISupportedInterfaceOrientations\(idiomSuffix)"] as? [String]
+            ?? info?["UISupportedInterfaceOrientations"] as? [String]
+        guard let orientationNames, !orientationNames.isEmpty else { return nil }
+
+        return orientationNames.reduce(into: UIInterfaceOrientationMask(rawValue: 0)) { mask, orientationName in
+            switch orientationName {
+            case "UIInterfaceOrientationPortrait": mask.insert(.portrait)
+            case "UIInterfaceOrientationPortraitUpsideDown": mask.insert(.portraitUpsideDown)
+            case "UIInterfaceOrientationLandscapeLeft": mask.insert(.landscapeLeft)
+            case "UIInterfaceOrientationLandscapeRight": mask.insert(.landscapeRight)
+            default: break
+            }
+        }
     }
     
     // MARK: - Cleanup
 
-    /// Cleans up the presentation window after dismissal.
-    static func cleanup() {
+    /// Dismisses the presented hosting controller before removing its window.
+    /// Root-hosted sheets have already animated out through SwiftUI, so they
+    /// fall through to immediate teardown even when `animated` is true.
+    static func cleanup(animated: Bool = false, completion: (() -> Void)? = nil) {
         let handler = onDismissHandler
-        
-        hostingController?.dismiss(animated: false)
-        hostingController = nil
-        window?.isHidden = true
-        window?.rootViewController = nil
-        window = nil
+        let keyWindowToRestore = previousKeyWindow
+        let hostingControllerToDismiss = hostingController
+        let windowToRemove = window
         onDismissHandler = nil
         
-        // Fire handler after clearing state to prevent re-entrancy issues
-        handler?()
+        let finish = {
+            if hostingController === hostingControllerToDismiss {
+                hostingController = nil
+            }
+            if window === windowToRemove {
+                windowToRemove?.resignKey()
+                windowToRemove?.isHidden = true
+                windowToRemove?.rootViewController = nil
+                window = nil
+                previousKeyWindow = nil
+                keyWindowToRestore?.makeKey()
+            }
+
+            // Fire callbacks after clearing state to prevent re-entrancy.
+            handler?()
+            completion?()
+        }
+
+        guard animated,
+              let hostingControllerToDismiss,
+              hostingControllerToDismiss.presentingViewController != nil
+        else {
+            hostingControllerToDismiss?.dismiss(animated: false)
+            finish()
+            return
+        }
+
+        hostingControllerToDismiss.dismiss(animated: true, completion: finish)
     }
     
     #if DEBUG

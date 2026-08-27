@@ -71,9 +71,8 @@ enum PresentationWindow {
     /// The hosting controller for the presented SwiftUI view.
     private static var hostingController: UIViewController?
 
-    /// iOS 17 requires the overlay to become key before presenting SwiftUI
-    /// content from its root controller. Weak so the SDK never extends the
-    /// host window's lifetime.
+    /// The host window restored after the Encore overlay closes. Weak so the
+    /// SDK never extends the host window's lifetime.
     private weak static var previousKeyWindow: UIWindow?
 
     /// Called when the window is dismissed (cleanup, swipe-away, etc.)
@@ -149,16 +148,10 @@ enum PresentationWindow {
         hosting.modalTransitionStyle = .coverVertical
         hosting.view.backgroundColor = .clear
 
-        let hostsDirectlyAtRoot: Bool
-        if #available(iOS 18.0, *) {
-            hostsDirectlyAtRoot = false
-        } else {
-            // A UIKit modal containing another SwiftUI sheet stays transparent
-            // on iOS 16–17, so sheet presentations keep direct root hosting.
-            // Full-screen content is rendered directly by OfferSheetContainer
-            // and can safely use UIKit's cover-vertical modal transition.
-            hostsDirectlyAtRoot = presentationStyle == .sheet
-        }
+        // Sheets use SwiftUI's own presentation from a root-hosted container.
+        // Full-screen content is rendered directly by OfferSheetContainer and
+        // presented once through UIKit's cover-vertical modal transition.
+        let hostsDirectlyAtRoot = presentationStyle == .sheet
 
         if hostsDirectlyAtRoot {
             newWindow.rootViewController = hosting
@@ -168,19 +161,13 @@ enum PresentationWindow {
             newWindow.rootViewController = presentingController
         }
 
-        if #unavailable(iOS 18.0) {
-            previousKeyWindow = sourceWindow
-        }
+        previousKeyWindow = sourceWindow
 
         // Store references
         window = newWindow
         hostingController = hosting
 
-        if #available(iOS 18.0, *) {
-            newWindow.isHidden = false
-        } else {
-            newWindow.makeKeyAndVisible()
-        }
+        newWindow.makeKeyAndVisible()
 
         if !hostsDirectlyAtRoot {
             newWindow.rootViewController?.present(hosting, animated: true)

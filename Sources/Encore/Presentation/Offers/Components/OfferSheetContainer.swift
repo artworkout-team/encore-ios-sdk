@@ -74,28 +74,22 @@ struct OfferSheetContainer: View {
 
     @ViewBuilder
     private var presentationRoot: some View {
-        if #available(iOS 18.0, *) {
-            presentedContainer
-        } else if presentationStyle == .fullScreenCover {
+        if presentationStyle == .fullScreenCover {
             if let presentationState {
                 presentationContent(for: presentationState)
             } else {
                 Color.clear
             }
         } else {
-            presentedContainer
+            sheetContainer
         }
     }
 
-    private var presentedContainer: some View {
+    private var sheetContainer: some View {
         Color.clear
-            .modifier(PresentationStyleModifier(
-                presentationStyle: presentationStyle,
-                presentationState: $presentationState,
-                content: { state in
-                    presentationContent(for: state)
-                }
-            ))
+            .sheet(item: $presentationState) { state in
+                presentationContent(for: state)
+            }
     }
 
     // MARK: - Presentation Content
@@ -157,29 +151,4 @@ struct OfferSheetContainer: View {
 struct CreditData: Identifiable {
     let id = UUID()
     let amount: Double
-}
-
-// MARK: - Presentation Style Modifier
-
-/// A ViewModifier that conditionally presents content as either a sheet or fullScreenCover
-@available(iOS 16.0, *)
-struct PresentationStyleModifier<PresentationContent: View>: ViewModifier {
-    let presentationStyle: SDUIPresentationStyle
-    @Binding var presentationState: OfferSheetContainer.PresentationState?
-    let content: (OfferSheetContainer.PresentationState) -> PresentationContent
-
-    func body(content baseContent: Content) -> some View {
-        switch presentationStyle {
-        case .sheet:
-            baseContent
-                .sheet(item: $presentationState) { state in
-                    self.content(state)
-                }
-        case .fullScreenCover:
-            baseContent
-                .fullScreenCover(item: $presentationState) { state in
-                    self.content(state)
-                }
-        }
-    }
 }

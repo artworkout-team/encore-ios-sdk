@@ -705,12 +705,21 @@ struct SDUIElementRenderer: View {
 
     // MARK: - ScrollView Renderer
 
+    @ViewBuilder
     private func renderScrollView(_ config: SDUIScrollView) -> some View {
-        SDUIScrollViewRenderer(
-            config: config,
-            context: context,
-            offer: offer
-        )
+        if #available(iOS 18.0, *) {
+            SDUISemanticScrollViewRenderer(
+                config: config,
+                context: context,
+                offer: offer
+            )
+        } else {
+            SDUIScrollViewRenderer(
+                config: config,
+                context: context,
+                offer: offer
+            )
+        }
     }
 
     /// Whether this scroll view owns the carousel's `currentIndex`.
@@ -978,6 +987,121 @@ struct SDUIElementRenderer: View {
 }
 
 // MARK: - Scroll View Renderer
+
+/// iOS 18+ scroll-position path. `ScrollPosition` separates the live scroll
+/// target from the shared offer selection, so a context update cannot restore
+/// an old card while SwiftUI is resolving the end of a drag.
+@available(iOS 18.0, *)
+private struct SDUISemanticScrollViewRenderer: View {
+    let config: SDUIScrollView
+    @ObservedObject var context: SDUIContext
+    let offer: Offer?
+
+    @State private var position: ScrollPosition
+
+    private var axis: Axis.Set {
+        config.axis?.axis ?? .vertical
+    }
+
+    private var scrollAxis: SDUIScrollAxis {
+        config.axis ?? .vertical
+    }
+
+    private var hasScrollTarget: Bool {
+        SDUIElementRenderer.tracksCarouselPosition(config)
+    }
+
+    private var resolvedContentMargin: CGFloat? {
+        guard let margins = config.contentMargins else { return nil }
+        return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
+    }
+
+    private var usesCenteredGeometry: Bool {
+        axis == .horizontal
+            && config.scrollAlignment == .center
+            && SDUIScrollLayout.offerItemWidth(for: config) != nil
+    }
+
+    init(config: SDUIScrollView, context: SDUIContext, offer: Offer?) {
+        self.config = config
+        self.context = context
+        self.offer = offer
+        _position = State(initialValue: ScrollPosition(
+            id: context.focusedIndex ?? 0,
+            anchor: config.scrollAlignment?.unitPoint
+        ))
+    }
+
+    var body: some View {
+        Group {
+            if usesCenteredGeometry {
+                GeometryReader { geometryProxy in
+                    scrollView(
+                        contentMargin: SDUIScrollLayout.centeredContentMargin(
+                            for: config,
+                            viewportWidth: geometryProxy.size.width
+                        ),
+                        viewportWidth: geometryProxy.size.width
+                    )
+                }
+            } else {
+                scrollView(contentMargin: resolvedContentMargin, viewportWidth: nil)
+            }
+        }
+        .modifier(SDUIStyleModifier(style: config.style))
+    }
+
+    @ViewBuilder
+    private func scrollView(contentMargin: CGFloat?, viewportWidth: CGFloat?) -> some View {
+        let scrollView = ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
+            scrollContent(centeredPadding: usesCenteredGeometry ? contentMargin : nil)
+                .environment(\.sduiCarouselViewportWidth, viewportWidth)
+        }
+        .applyScrollTargetBehavior(config.scrollTargetBehavior)
+        .applyContentMargin(usesCenteredGeometry ? nil : contentMargin, axis: axis)
+        .scrollClipDisabled(true)
+
+        if hasScrollTarget {
+            scrollView
+                .scrollPosition($position, anchor: config.scrollAlignment?.unitPoint)
+                .onChange(of: position.viewID(type: Int.self)) { _, newIndex in
+                    commitScrolledPosition(newIndex)
+                }
+                .onChange(of: context.focusedIndex) { _, newIndex in
+                    animateContextSelection(newIndex)
+                }
+        } else {
+            scrollView
+        }
+    }
+
+    @ViewBuilder
+    private func scrollContent(centeredPadding: CGFloat?) -> some View {
+        if let centeredPadding {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                .padding(.horizontal, centeredPadding)
+        } else {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+        }
+    }
+
+    private func animateContextSelection(_ newIndex: Int?) {
+        guard let newIndex, newIndex != position.viewID(type: Int.self) else { return }
+        withAnimation(.easeInOut(duration: 0.35)) {
+            position.scrollTo(id: newIndex, anchor: config.scrollAlignment?.unitPoint)
+        }
+    }
+
+    private func commitScrolledPosition(_ newIndex: Int?) {
+        guard let newIndex, newIndex != context.currentIndex else { return }
+        let requestedIndex = context.focusedIndex
+        context.currentIndex = newIndex
+        context.selectCenteredOffer(at: newIndex)
+        if newIndex != requestedIndex {
+            context.trackScroll(axis: scrollAxis, position: newIndex)
+        }
+    }
+}
 
 private struct SDUIOfferCenterPreferenceKey: PreferenceKey {
     static let defaultValue: [Int: CGFloat] = [:]

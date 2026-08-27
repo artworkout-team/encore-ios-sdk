@@ -1061,11 +1061,21 @@ private struct SDUIScrollViewRenderer: View {
 
     private func scrollView(contentMargin: CGFloat?) -> some View {
         ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
-            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+            scrollContent(centeredPadding: usesCenteredGeometry ? contentMargin : nil)
         }
         .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyContentMargin(contentMargin, axis: axis)
+        .applyContentMargin(usesCenteredGeometry ? nil : contentMargin, axis: axis)
         .scrollClipDisabled(true)
+    }
+
+    @ViewBuilder
+    private func scrollContent(centeredPadding: CGFloat?) -> some View {
+        if let centeredPadding {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                .padding(.horizontal, centeredPadding)
+        } else {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+        }
     }
 
     private func scrollToContextSelection(using scrollProxy: ScrollViewProxy, animated: Bool) {

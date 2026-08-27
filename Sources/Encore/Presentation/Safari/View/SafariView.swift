@@ -113,3 +113,4 @@ struct SafariURLWrapper: Identifiable {
     let id = UUID()
     let url: URL
 }
+

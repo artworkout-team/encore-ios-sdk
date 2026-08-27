@@ -4,8 +4,8 @@
 // Encapsulates UIKit bridging for SwiftUI overlay presentation.
 //
 
-import SwiftUI
 import UIKit
+import SwiftUI
 
 /// Manages presentation windows and view controller discovery.
 ///
@@ -13,14 +13,14 @@ import UIKit
 /// SwiftUI views are hosted in a custom `UIWindow` at the highest window level.
 ///
 /// Thread Safety: All operations are `@MainActor` isolated.
-extension OfferContext.AppearanceMode {
+internal extension OfferContext.AppearanceMode {
     /// `.unspecified` for `auto` so the sheet inherits the HOST app rather than
     /// the device — a light-only publisher should not get a dark sheet.
     var userInterfaceStyle: UIUserInterfaceStyle {
         switch self {
         case .light: return .light
-        case .dark: return .dark
-        case .auto: return .unspecified
+        case .dark:  return .dark
+        case .auto:  return .unspecified
         }
     }
 }
@@ -30,7 +30,7 @@ private final class PresentationHostingController<Content: View>: UIHostingContr
     private let orientationMask: UIInterfaceOrientationMask
     private let preferredOrientation: UIInterfaceOrientation
     private let allowsAutorotation: Bool
-
+    
     init(
         rootView: Content,
         orientationMask: UIInterfaceOrientationMask,
@@ -62,29 +62,27 @@ private final class PresentationHostingController<Content: View>: UIHostingContr
 }
 
 @MainActor
-enum PresentationWindow {
+internal enum PresentationWindow {
     // MARK: - Window State
-
+    
     /// The custom window used for presenting offer sheets.
     private(set) static var window: UIWindow?
-
+    
     /// The hosting controller for the presented SwiftUI view.
     private static var hostingController: UIViewController?
-
+    
     /// The host window restored after the Encore overlay closes. Weak so the
     /// SDK never extends the host window's lifetime.
     private weak static var previousKeyWindow: UIWindow?
 
     /// Called when the window is dismissed (cleanup, swipe-away, etc.)
     private static var onDismissHandler: (() -> Void)?
-
+    
     /// Whether an offer sheet is currently presented.
-    static var isPresented: Bool {
-        window != nil
-    }
-
+    static var isPresented: Bool { window != nil }
+    
     // MARK: - Present SwiftUI View
-
+    
     /// Presents a SwiftUI view in a transparent overlay `UIWindow` above all other content.
     /// Returns the created window on success, nil when no window scene is available.
     /// `overrideUserInterfaceStyle` forces the sheet's appearance; `.unspecified` (the
@@ -106,15 +104,15 @@ enum PresentationWindow {
             ))
             cleanup()
         }
-
+        
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else {
             Logger.error(.integration(.notConfigured), context: .presentOfferInitialization)
             return nil
         }
-
+        
         // Store dismiss handler
         onDismissHandler = onDismiss
-
+        
         // Create overlay window
         let newWindow = UIWindow(windowScene: windowScene)
         // Set on the WINDOW, not via `.preferredColorScheme`: the SDUI palette
@@ -136,7 +134,7 @@ enum PresentationWindow {
             ?? sourceRootViewController?.supportedInterfaceOrientations
             ?? .all
         let preferredOrientation = windowScene.interfaceOrientation
-
+        
         // Create hosting controller
         let hosting = PresentationHostingController(
             rootView: rootView,
@@ -162,11 +160,11 @@ enum PresentationWindow {
         }
 
         previousKeyWindow = sourceWindow
-
+        
         // Store references
         window = newWindow
         hostingController = hosting
-
+        
         newWindow.makeKeyAndVisible()
 
         if !hostsDirectlyAtRoot {
@@ -192,7 +190,7 @@ enum PresentationWindow {
             }
         }
     }
-
+    
     // MARK: - Cleanup
 
     /// Dismisses the presented hosting controller before removing its window.
@@ -204,7 +202,7 @@ enum PresentationWindow {
         let hostingControllerToDismiss = hostingController
         let windowToRemove = window
         onDismissHandler = nil
-
+        
         let finish = {
             if hostingController === hostingControllerToDismiss {
                 hostingController = nil
@@ -234,40 +232,37 @@ enum PresentationWindow {
 
         hostingControllerToDismiss.dismiss(animated: true, completion: finish)
     }
-
+    
     #if DEBUG
-        /// Test-only: set the dismiss handler without presenting a window.
-        static func _setDismissHandler(_ handler: (() -> Void)?) {
-            onDismissHandler = handler
-        }
+    /// Test-only: set the dismiss handler without presenting a window.
+    static func _setDismissHandler(_ handler: (() -> Void)?) {
+        onDismissHandler = handler
+    }
     #endif
 
     // MARK: - View Controller Discovery
-
+    
     /// Finds the top-most presented view controller in the app's window hierarchy.
     static func topViewController() -> UIViewController? {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
               let window = windowScene.windows.first,
-              let rootViewController = window.rootViewController
-        else {
+              let rootViewController = window.rootViewController else {
             return nil
         }
         return topViewController(from: rootViewController)
     }
-
+    
     /// Recursively traverses view controller hierarchy to find the top-most controller.
     static func topViewController(from viewController: UIViewController) -> UIViewController {
         if let presentedViewController = viewController.presentedViewController {
             return topViewController(from: presentedViewController)
         }
         if let navigationController = viewController as? UINavigationController,
-           let top = navigationController.topViewController
-        {
+           let top = navigationController.topViewController {
             return topViewController(from: top)
         }
         if let tabBarController = viewController as? UITabBarController,
-           let selected = tabBarController.selectedViewController
-        {
+           let selected = tabBarController.selectedViewController {
             return topViewController(from: selected)
         }
         return viewController

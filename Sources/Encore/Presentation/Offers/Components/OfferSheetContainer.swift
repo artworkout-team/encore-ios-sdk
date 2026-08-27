@@ -51,12 +51,13 @@ enum OfferSheetPresentationHost {
 /// surrounding window or view-controller navigation.
 @available(iOS 16.0, *)
 struct OfferSheetContainer: View {
+    
     // MARK: - Presentation State
-
+    
     enum PresentationState: Identifiable {
         case offers
         case creditClaimed(amount: Double, result: Result<PresentationResult, EncoreError>)
-
+        
         var id: String {
             switch self {
             case .offers: return "offers"
@@ -64,9 +65,9 @@ struct OfferSheetContainer: View {
             }
         }
     }
-
+    
     // MARK: - Properties
-
+    
     let offerResponse: OfferResponse
     let userId: String
     let presentationId: String
@@ -82,11 +83,11 @@ struct OfferSheetContainer: View {
     let presentationHost: OfferSheetPresentationHost
     let onDismissRequest: () -> Void
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
-
+    
     @State private var presentationState: PresentationState?
-
+    
     // MARK: - Body
-
+    
     var body: some View {
         presentationRoot
             .onAppear {
@@ -99,9 +100,9 @@ struct OfferSheetContainer: View {
             .onDisappear {
                 // Coordinator's complete() owns cleanup.
                 #if DEBUG
-                    if PresentationWindow.isPresented {
-                        Logger.warn(.presentation, "Window still present after onDisappear")
-                    }
+                if PresentationWindow.isPresented {
+                    Logger.warn(.presentation, "Window still present after onDisappear")
+                }
                 #endif
             }
     }
@@ -125,9 +126,9 @@ struct OfferSheetContainer: View {
                 presentationContent(for: state)
             }
     }
-
+    
     // MARK: - Presentation Content
-
+    
     @ViewBuilder
     private func presentationContent(for state: PresentationState) -> some View {
         switch state {
@@ -163,7 +164,7 @@ struct OfferSheetContainer: View {
             // per-element `style.safeAreaPadding`; on sheet, natural behavior is
             // kept. `respectsSafeArea: false` opts the whole tree out.
 
-        case let .creditClaimed(amount, result):
+        case .creditClaimed(let amount, let result):
             CreditClaimedView(
                 credit: CreditData(amount: amount),
                 offerContext: offerContext
@@ -176,13 +177,13 @@ struct OfferSheetContainer: View {
             .compatiblePresentationBackground(OfferSheetStyles.backgroundColor)
         }
     }
-
+    
     // MARK: - Handlers
-
+    
     private func handleOfferSheetCompletion(_ result: Result<PresentationResult, EncoreError>) {
         onCompletion(result)
     }
-
+    
     private func handleCreditClaimedDismiss(result _: Result<PresentationResult, EncoreError>) {
         presentationState = nil
     }

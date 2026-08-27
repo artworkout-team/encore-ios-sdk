@@ -171,6 +171,7 @@ struct OfferSheetView: View {
     // MARK: - SDUI Content
 
     @available(iOS 17.0, *)
+    @ViewBuilder
     private func sduiContent(_ loadedConfig: SDUIConfig) -> some View {
         ZStack(alignment: .top) {
             SDUIElementRenderer(element: loadedConfig.root, context: sduiContext)
@@ -314,7 +315,7 @@ private extension View {
     @ViewBuilder
     func applyCornerRadius(_ radius: CGFloat?) -> some View {
         if let radius = radius {
-            presentationCornerRadius(radius)
+            self.presentationCornerRadius(radius)
         } else {
             self
         }

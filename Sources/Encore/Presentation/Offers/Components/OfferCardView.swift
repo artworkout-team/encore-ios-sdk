@@ -103,3 +103,4 @@ struct OfferCardView: View {
         .shadow(color: shadowColor, radius: 4)
     }
 }
+

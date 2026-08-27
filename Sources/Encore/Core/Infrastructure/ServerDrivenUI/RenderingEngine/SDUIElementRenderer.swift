@@ -5,8 +5,8 @@
 //  Recursive view renderer for Server-Driven UI elements
 //
 
-import AVKit
 import SwiftUI
+import AVKit
 
 // MARK: - Main Element Renderer
 
@@ -42,23 +42,23 @@ struct SDUIElementRenderer: View {
 
     private var elementStyle: SDUIStyle? {
         switch element {
-        case let .text(config): config.style
-        case let .systemImage(config): config.style
-        case let .asyncImage(config): config.style
-        case let .asyncVideo(config): config.style
-        case let .appIcon(config): config.style
-        case let .button(config): config.style
-        case let .vStack(config), let .hStack(config), let .zStack(config): config.style
-        case let .spacer(config): config.style
-        case let .shape(config): config.style
-        case let .gradient(config): config.style
-        case let .scrollView(config): config.style
-        case let .forEach(config): config.style
-        case let .group(config): config.style
-        case let .textField(config): config.style
-        case let .toggle(config): config.style
-        case let .slideButton(config): config.style
-        case let .confetti(config): config.style
+        case .text(let config): config.style
+        case .systemImage(let config): config.style
+        case .asyncImage(let config): config.style
+        case .asyncVideo(let config): config.style
+        case .appIcon(let config): config.style
+        case .button(let config): config.style
+        case .vStack(let config), .hStack(let config), .zStack(let config): config.style
+        case .spacer(let config): config.style
+        case .shape(let config): config.style
+        case .gradient(let config): config.style
+        case .scrollView(let config): config.style
+        case .forEach(let config): config.style
+        case .group(let config): config.style
+        case .textField(let config): config.style
+        case .toggle(let config): config.style
+        case .slideButton(let config): config.style
+        case .confetti(let config): config.style
         case .conditional, .compactPageIndicator, .empty: nil
         }
     }
@@ -86,9 +86,9 @@ struct SDUIElementRenderer: View {
         // the host has no / a white icon) so the JSON `fallback` is used; once
         // computed, the store publishes and the observed re-render swaps it in.
         #if canImport(UIKit)
-            if let appHex = dominantColors.dominantHexForHostAppIcon() {
-                v["appDominantColor"] = appHex
-            }
+        if let appHex = dominantColors.dominantHexForHostAppIcon() {
+            v["appDominantColor"] = appHex
+        }
         #endif
         return v
     }
@@ -97,59 +97,59 @@ struct SDUIElementRenderer: View {
     private func resolveColor(_ color: SDUIColor?) -> Color? {
         context.resolveColor(color, extraValues: colorValues)
     }
-
+    
     @ViewBuilder
     private func renderElement(_ element: SDUIElement) -> some View {
         switch element {
-        case let .text(config):
+        case .text(let config):
             renderText(config)
-        case let .systemImage(config):
+        case .systemImage(let config):
             renderSystemImage(config)
-        case let .asyncImage(config):
+        case .asyncImage(let config):
             renderAsyncImage(config)
-        case let .asyncVideo(config):
+        case .asyncVideo(let config):
             renderAsyncVideo(config)
-        case let .appIcon(config):
+        case .appIcon(let config):
             renderAppIcon(config)
-        case let .button(config):
+        case .button(let config):
             renderButton(config)
-        case let .vStack(config):
+        case .vStack(let config):
             renderVStack(config)
-        case let .hStack(config):
+        case .hStack(let config):
             renderHStack(config)
-        case let .zStack(config):
+        case .zStack(let config):
             renderZStack(config)
-        case let .spacer(config):
+        case .spacer(let config):
             renderSpacer(config)
-        case let .shape(config):
+        case .shape(let config):
             renderShape(config)
-        case let .gradient(config):
+        case .gradient(let config):
             renderGradient(config)
-        case let .scrollView(config):
+        case .scrollView(let config):
             renderScrollView(config)
-        case let .forEach(config):
+        case .forEach(let config):
             renderForEach(config)
-        case let .conditional(config):
+        case .conditional(let config):
             renderConditional(config)
-        case let .group(config):
+        case .group(let config):
             renderGroup(config)
-        case let .textField(config):
+        case .textField(let config):
             renderTextField(config)
-        case let .toggle(config):
+        case .toggle(let config):
             renderToggle(config)
-        case let .slideButton(config):
+        case .slideButton(let config):
             renderSlideButton(config)
-        case let .compactPageIndicator(config):
+        case .compactPageIndicator(let config):
             renderCompactPageIndicator(config)
-        case let .confetti(config):
+        case .confetti(let config):
             renderConfetti(config)
         case .empty:
             EmptyView()
         }
     }
-
+    
     // MARK: - Text Renderer
-
+    
     /// Resolves a text binding using the item-specific offer (for forEach loops) or falls back to context
     private func resolveTextBinding(_ binding: SDUITextBinding) -> String {
         // If we have an item-specific offer (inside a forEach loop), use it for offer-related bindings
@@ -171,7 +171,7 @@ struct SDUIElementRenderer: View {
         // No item-specific offer, use context (which uses currentOffer)
         return context.resolveText(binding)
     }
-
+    
     private func resolveText(_ config: SDUIText) -> String {
         // First, check for valueKey (direct read from context.values)
         if let valueKey = config.valueKey, let value = context.values[valueKey] {
@@ -186,16 +186,16 @@ struct SDUIElementRenderer: View {
             }
             // Fall back to static text if map lookup fails
         }
-
+        
         // Check for text binding
         if let binding = config.textBinding {
             return resolveTextBinding(binding)
         }
-
+        
         // Resolve template placeholders (${variableName}) in the text
         return context.resolveTemplateText(config.text)
     }
-
+    
     @ViewBuilder
     private func renderText(_ config: SDUIText) -> some View {
         // Calculate effective line spacing from lineHeight or lineSpacing
@@ -253,7 +253,7 @@ struct SDUIElementRenderer: View {
             .multilineTextAlignment(config.multilineAlignment?.textAlignment ?? .leading)
             .modifier(SDUIStyleModifier(style: config.style))
     }
-
+    
     /// Builds a `Text` whose `*marked*` runs carry `highlightColor`.
     ///
     /// Concatenated `Text` rather than `AttributedString` so the result is still
@@ -269,9 +269,7 @@ struct SDUIElementRenderer: View {
     ) -> Text {
         SDUIInlineMarkup.parse(resolved).reduce(Text("")) { accumulated, run in
             var piece = Text(run.text)
-            if let font {
-                piece = piece.applySDUIFont(font)
-            }
+            if let font { piece = piece.applySDUIFont(font) }
             return accumulated + piece.foregroundColor(run.isHighlighted ? highlightColor : baseColor)
         }
     }
@@ -295,7 +293,7 @@ struct SDUIElementRenderer: View {
             let additionalSpacing = (lineHeight - 1.0) * font.size
             return max(0, additionalSpacing)
         }
-
+        
         // Fall back to direct lineSpacing value
         return config.lineSpacing ?? 0
     }
@@ -306,7 +304,7 @@ struct SDUIElementRenderer: View {
         let natural = UIFont.systemFont(ofSize: font.size, weight: font.weight.uiFontWeight).lineHeight
         return multiple * font.size - natural
     }
-
+    
     /// Renders concatenated text segments (like SwiftUI's Text + Text)
     private func renderConcatenatedText(_ config: SDUIText, segments: [SDUITextSegment]) -> Text {
         // Use the shared font from config as default
@@ -321,17 +319,13 @@ struct SDUIElementRenderer: View {
             let color = resolveColor(segment.color) ?? defaultColor
 
             var piece = TemplateText(segmentText, context: context.offerContext).text
-            if let font {
-                piece = piece.applySDUIFont(font)
-            } else {
-                piece = piece.font(.body)
-            }
+            if let font { piece = piece.applySDUIFont(font) } else { piece = piece.font(.body) }
             result = result + piece.foregroundColor(color)
         }
-
+        
         return result
     }
-
+    
     /// Resolves text from a segment, checking for bindings and substituting template placeholders
     private func resolveSegmentText(_ segment: SDUITextSegment) -> String {
         if let binding = segment.textBinding {
@@ -340,9 +334,9 @@ struct SDUIElementRenderer: View {
         // Resolve template placeholders (${variableName}) in the text
         return context.resolveTemplateText(segment.text)
     }
-
+    
     // MARK: - System Image Renderer
-
+    
     @ViewBuilder
     private func renderSystemImage(_ config: SDUISystemImage) -> some View {
         let image = Image(systemName: config.systemName)
@@ -352,21 +346,21 @@ struct SDUIElementRenderer: View {
 
         if config.symbolEffect == "bounce" {
             #if compiler(>=6.0)
-                if #available(iOS 18.0, *) {
-                    image.symbolEffect(.bounce, options: .nonRepeating)
-                } else {
-                    image
-                }
-            #else
+            if #available(iOS 18.0, *) {
+                image.symbolEffect(.bounce, options: .nonRepeating)
+            } else {
                 image
+            }
+            #else
+            image
             #endif
         } else {
             image
         }
     }
-
+    
     // MARK: - Async Image Renderer
-
+    
     private func resolveImageUrl(_ config: SDUIAsyncImage) -> String? {
         if let binding = config.urlBinding {
             return context.resolveCreativeUrl(binding, for: offer)
@@ -374,11 +368,11 @@ struct SDUIElementRenderer: View {
         // Resolve template variables in static URLs (e.g., "${selectedOfferLogoUrl}")
         if let url = config.url {
             let resolved = context.resolveTemplateText(url)
-            return resolved.contains("${") ? nil : resolved // unresolved placeholder → no URL
+            return resolved.contains("${") ? nil : resolved  // unresolved placeholder → no URL
         }
         return nil
     }
-
+    
     private func renderAsyncImage(_ config: SDUIAsyncImage) -> some View {
         let url = URL(string: resolveImageUrl(config) ?? "")
         let contentMode = config.contentMode?.contentMode ?? .fit
@@ -402,7 +396,7 @@ struct SDUIElementRenderer: View {
         // loads, SwiftUI's natural aspect ratio from the bitmap takes over.
         let placeholderAspectRatio: CGFloat? = overlayConfig?.aspectRatio
             ?? config.aspectRatio
-            ?? 1412.0 / 596.0
+            ?? 1412.0/596.0
 
         // Impression source: when the LOADED primary creative is ≥ 50%
         // visible in the active window, fire `onOfferVisible(idx)`. The
@@ -429,16 +423,16 @@ struct SDUIElementRenderer: View {
         .modifier(SDUIStyleModifier(style: config.style))
         .modifier(CreativeOverlayModifier(config: overlayConfig, context: context))
     }
-
+    
     // MARK: - Async Video Renderer
-
+    
     private func resolveVideoUrl(_ config: SDUIAsyncVideo) -> String? {
         if let binding = config.urlBinding {
             return context.resolveCreativeUrl(binding, for: offer)
         }
         return config.url
     }
-
+    
     private func renderAsyncVideo(_ config: SDUIAsyncVideo) -> some View {
         let urlString = resolveVideoUrl(config)
         let contentMode = config.contentMode ?? .fill
@@ -458,17 +452,17 @@ struct SDUIElementRenderer: View {
     @ViewBuilder
     private func renderAppIcon(_ config: SDUIAppIcon) -> some View {
         #if canImport(UIKit)
-            if let uiImage = Bundle.hostAppIcon {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .modifier(SDUIStyleModifier(style: config.style))
-            }
+        if let uiImage = Bundle.hostAppIcon {
+            Image(uiImage: uiImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .modifier(SDUIStyleModifier(style: config.style))
+        }
         #endif
     }
 
     // MARK: - Button Renderer
-
+    
     private func renderButton(_ config: SDUIButton) -> some View {
         let isClaimDisabled = config.action.type == .claimOffer && !context.isClaimEnabled
         let isDisabled = (config.disabled ?? false) || isClaimDisabled
@@ -497,12 +491,12 @@ struct SDUIElementRenderer: View {
         // assert non-leading cards are tappable (regression guard for #2).
         .accessibilityIdentifier(config.action.type == .claimOffer ? "encore_claim_offer_button" : "")
     }
-
+    
     /// Handle button actions - state machine actions are handled internally, others are delegated
     private func handleAction(_ action: SDUIAction) {
         // Track button tap analytics
         context.trackButtonTap(actionType: action.type)
-
+        
         switch action.type {
         case .setState:
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -536,9 +530,9 @@ struct SDUIElementRenderer: View {
             context.onAction(action, offer ?? context.currentOffer)
         }
     }
-
+    
     // MARK: - Stack Renderers
-
+    
     @ViewBuilder
     private func renderVStack(_ config: SDUIStack) -> some View {
         let alignment = config.alignment?.horizontalAlignment ?? .center
@@ -567,7 +561,7 @@ struct SDUIElementRenderer: View {
     private static func directOfferLoop(in config: SDUIStack) -> SDUIForEach? {
         guard config.style?.scrollTargetLayout == true,
               config.children.count == 1,
-              case let .forEach(loop) = config.children[0]
+              case .forEach(let loop) = config.children[0]
         else { return nil }
         guard case .offers = loop.dataSource else { return nil }
         return loop
@@ -627,7 +621,7 @@ struct SDUIElementRenderer: View {
             .modifier(SDUIStyleModifier(style: config.style))
         }
     }
-
+    
     private func renderZStack(_ config: SDUIStack) -> some View {
         ZStack(alignment: config.alignment?.alignment ?? .center) {
             ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
@@ -636,9 +630,9 @@ struct SDUIElementRenderer: View {
         }
         .modifier(SDUIStyleModifier(style: config.style))
     }
-
+    
     // MARK: - Spacer Renderer
-
+    
     /// A styled spacer is a PROPORTIONAL gap:
     /// `{"spacer": {"style": {"relativeHeight": 0.1}}}` stays 10% of the
     /// container at every screen height, instead of letting a taller device's
@@ -668,13 +662,13 @@ struct SDUIElementRenderer: View {
             .modifier(SDUIStyleModifier(style: config.style))
         }
     }
-
+    
     // MARK: - Shape Renderer
-
+    
     @ViewBuilder
     private func renderShape(_ config: SDUIShape) -> some View {
         let fillColor = resolveColor(config.fillColor) ?? Color.clear
-
+        
         switch config.type {
         case .rectangle:
             Rectangle().fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
@@ -686,14 +680,14 @@ struct SDUIElementRenderer: View {
             Capsule().fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
         }
     }
-
+    
     // MARK: - Gradient Renderer
-
+    
     private func renderGradient(_ config: SDUIGradient) -> some View {
         let colors = config.colors.map { stop in
             (resolveColor(stop.color) ?? .clear).opacity(stop.opacity ?? 1.0)
         }
-
+        
         return LinearGradient(
             colors: colors,
             startPoint: config.direction.startPoint,
@@ -702,9 +696,9 @@ struct SDUIElementRenderer: View {
         .modifier(SDUIStyleModifier(style: config.style))
         .allowsHitTesting(false)
     }
-
+    
     // MARK: - ScrollView Renderer
-
+    
     @ViewBuilder
     private func renderScrollView(_ config: SDUIScrollView) -> some View {
         if #available(iOS 18.0, *) {
@@ -733,14 +727,14 @@ struct SDUIElementRenderer: View {
     }
 
     // MARK: - ForEach Renderer
-
+    
     @ViewBuilder
     private func renderForEach(_ config: SDUIForEach) -> some View {
         switch config.dataSource {
         case .offers:
             renderOfferItems(config)
         case .pageIndicators:
-            ForEach(0 ..< context.offers.count, id: \.self) { index in
+            ForEach(0..<context.offers.count, id: \.self) { index in
                 SDUIElementRenderer(
                     element: config.itemTemplate,
                     context: context,
@@ -753,8 +747,13 @@ struct SDUIElementRenderer: View {
 
     private func renderOfferItems(_ config: SDUIForEach) -> some View {
         let limitedOffers = config.limit.map { Array(context.offers.prefix($0)) } ?? context.offers
+        // When the card carries a `scrollTransition` (coverflow), drive each
+        // card's zIndex by its distance from the centered index so the
+        // focused card draws ON TOP of both neighbors.
         let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
         let centeredIndex = context.focusedIndex ?? 0
+        // Impression-firing lives on the loaded primary creative inside
+        // `CachedAsyncImage`; the iteration is not the right scope.
         return ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
             renderOfferItem(config.itemTemplate, offer: offerItem, index: index)
                 .background {
@@ -768,13 +767,15 @@ struct SDUIElementRenderer: View {
                 }
                 .id(index)
                 .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
+                // Publish this card's distance from the centered card so
+                // descendant `scrollFade` layers fade by selection state.
                 .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
         }
     }
 
     @ViewBuilder
     private func renderOfferItem(_ template: SDUIElement, offer: Offer, index: Int) -> some View {
-        if case let .button(config) = template, config.action.type == .selectOffer {
+        if case .button(let config) = template, config.action.type == .selectOffer {
             Button {
                 context.trackButtonTap(actionType: config.action.type)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -803,7 +804,7 @@ struct SDUIElementRenderer: View {
             )
         }
     }
-
+    
     /// Whether the (top-level) style of an item template carries a
     /// `scrollTransition` — the signal that a carousel item wants coverflow
     /// behavior (and thus centeredness-based zIndex). Checks the wrapping
@@ -811,17 +812,18 @@ struct SDUIElementRenderer: View {
     /// group/stack wrappers that hold the scrollTransition.
     private static func elementHasScrollTransition(_ element: SDUIElement) -> Bool {
         switch element {
-        case let .button(c): return c.style?.scrollTransition != nil
-        case let .group(c): return c.style?.scrollTransition != nil
-        case let .vStack(c), let .hStack(c), let .zStack(c): return c.style?.scrollTransition != nil
-        case let .shape(c): return c.style?.scrollTransition != nil
-        case let .asyncImage(c): return c.style?.scrollTransition != nil
+        case .button(let c): return c.style?.scrollTransition != nil
+        case .group(let c): return c.style?.scrollTransition != nil
+        case .vStack(let c), .hStack(let c), .zStack(let c): return c.style?.scrollTransition != nil
+        case .shape(let c): return c.style?.scrollTransition != nil
+        case .asyncImage(let c): return c.style?.scrollTransition != nil
         default: return false
         }
     }
 
     // MARK: - Compact Page Indicator Renderer
 
+    @ViewBuilder
     private func renderCompactPageIndicator(_ config: SDUICompactPageIndicator) -> some View {
         CompactPageIndicator(
             totalPages: context.offers.count,
@@ -830,7 +832,7 @@ struct SDUIElementRenderer: View {
             inactiveColor: resolveColor(config.inactiveColor) ?? OfferSheetStyles.indicatorGray
         )
     }
-
+    
     // MARK: - Confetti Renderer
 
     /// Renders a native one-shot confetti burst. Fills its container by default
@@ -863,37 +865,39 @@ struct SDUIElementRenderer: View {
         switch condition {
         case .hasMultipleOffers:
             return context.offers.count > 1
-        case let .isCurrentPage(index):
+        case .isCurrentPage(let index):
             return context.focusedIndex == index
         case .isCurrentPageBinding:
             return isCurrentPage
         // NEW: Generic state machine conditions
-        case let .stateEquals(state):
+        case .stateEquals(let state):
             return context.isState(state)
-        case let .valueEquals(key, value):
+        case .valueEquals(let key, let value):
             return context.valueEquals(key: key, value: value)
-        case let .hasValue(key):
+        case .hasValue(let key):
             return context.hasValue(key: key)
         case .hasIntroOffer:
             return context.offerContext.iap.hasIntroOffer
         case .hasFreeTrial:
             return context.offerContext.iap.hasFreeTrial
-        case let .isSelectedOffer(targetKey):
+        case .isSelectedOffer(let targetKey):
             // Row-aware: true when the current forEach offer's id matches
             // the stored selection. Used by list-style layouts to render
             // per-card selection state without row-binding literals.
             guard let current = (offer ?? context.currentOffer) else { return false }
             let key = targetKey ?? "selectedOfferId"
             return context.values[key] == current.id
+
         // Generic boolean combinators
-        case let .and(conditions):
+        case .and(let conditions):
             return conditions.allSatisfy { evaluateCondition($0) }
-        case let .or(conditions):
+        case .or(let conditions):
             return conditions.contains { evaluateCondition($0) }
-        case let .not(condition):
+        case .not(let condition):
             return !evaluateCondition(condition)
-        case let .equals(lhs, rhs):
+        case .equals(let lhs, let rhs):
             return resolveValueRef(lhs) == resolveValueRef(rhs)
+
         // Offer-position predicates (row-aware)
         case .isFirstOffer:
             return currentOfferIndex == 0
@@ -903,7 +907,7 @@ struct SDUIElementRenderer: View {
         case .isMiddleOffer:
             guard let idx = currentOfferIndex, context.offers.count > 0 else { return false }
             return idx == context.offers.count / 2
-        case let .offerIndexEquals(target):
+        case .offerIndexEquals(let target):
             return currentOfferIndex == target
         }
     }
@@ -918,9 +922,9 @@ struct SDUIElementRenderer: View {
     /// Resolves an `equals` operand to a comparable string.
     private func resolveValueRef(_ ref: SDUIValueRef) -> String? {
         switch ref {
-        case let .literal(value):
+        case .literal(let value):
             return value
-        case let .binding(key):
+        case .binding(let key):
             return context.values[key]
         case .state:
             return context.currentState
@@ -928,7 +932,8 @@ struct SDUIElementRenderer: View {
             return currentOfferIndex.map(String.init)
         }
     }
-
+    
+    @ViewBuilder
     private func renderConditional(_ config: SDUIConditional) -> some View {
         Group {
             if evaluateCondition(config.condition) {
@@ -942,12 +947,14 @@ struct SDUIElementRenderer: View {
         // a carousel's explicit tap-to-scroll animation.
         .transition(.identity)
     }
-
+    
     // MARK: - Group Renderer
 
     private func renderGroup(_ config: SDUIGroup) -> some View {
-        SDUIElementRenderer(element: config.content, context: context, offer: offer, isCurrentPage: isCurrentPage)
-            .modifier(SDUIStyleModifier(style: config.style))
+        Group {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer, isCurrentPage: isCurrentPage)
+        }
+        .modifier(SDUIStyleModifier(style: config.style))
     }
 
     // MARK: - TextField Renderer
@@ -1226,9 +1233,9 @@ enum SDUIScrollLayout {
     }
 
     static func offerItemWidth(for config: SDUIScrollView) -> CGFloat? {
-        guard case let .hStack(stack) = config.content,
+        guard case .hStack(let stack) = config.content,
               stack.children.count == 1,
-              case let .forEach(loop) = stack.children[0],
+              case .forEach(let loop) = stack.children[0],
               case .offers = loop.dataSource,
               let itemWidth = fixedWidth(of: loop.itemTemplate)
         else { return nil }
@@ -1237,11 +1244,11 @@ enum SDUIScrollLayout {
 
     private static func fixedWidth(of element: SDUIElement) -> CGFloat? {
         switch element {
-        case let .button(config):
+        case .button(let config):
             return config.style?.frame?.width ?? fixedWidth(of: config.content)
-        case let .group(config):
+        case .group(let config):
             return config.style?.frame?.width ?? fixedWidth(of: config.content)
-        case let .vStack(config), let .hStack(config), let .zStack(config):
+        case .vStack(let config), .hStack(let config), .zStack(let config):
             if let width = config.style?.frame?.width {
                 return width
             }
@@ -1326,7 +1333,7 @@ private struct SDUISlideButtonView: View {
                                         .init(color: .clear, location: 0),
                                         .init(color: .white, location: 0.4),
                                         .init(color: .white, location: 0.6),
-                                        .init(color: .clear, location: 1.0),
+                                        .init(color: .clear, location: 1.0)
                                     ],
                                     startPoint: .leading,
                                     endPoint: .trailing
@@ -1483,26 +1490,26 @@ private struct SDUITextFieldView: View {
 private class VideoPlayerViewModel: ObservableObject {
     @Published var player: AVPlayer?
     @Published var isReady = false
-
+    
     private var loopObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
     private var asset: AVAsset?
-
+    
     func preload(urlString: String?) {
         guard asset == nil else { return }
         guard let urlString = urlString, let url = URL(string: urlString) else { return }
-
+        
         // Create asset and start preloading playable status
         let videoAsset = AVURLAsset(url: url)
-        asset = videoAsset
-
+        self.asset = videoAsset
+        
         // Preload essential properties asynchronously
         Task {
             do {
                 // Load playable status to start buffering
                 let isPlayable = try await videoAsset.load(.isPlayable)
                 guard isPlayable else { return }
-
+                
                 await MainActor.run {
                     setupPlayer(with: videoAsset)
                 }
@@ -1511,21 +1518,21 @@ private class VideoPlayerViewModel: ObservableObject {
             }
         }
     }
-
+    
     @MainActor
     private func setupPlayer(with asset: AVAsset) {
         guard player == nil else { return }
-
+        
         let playerItem = AVPlayerItem(asset: asset)
         // Buffer more content for smoother playback
         // 5 is in seconds; this duration provides a small pre-buffer to reduce stalls
         // while avoiding excessive memory/network usage for typical short-form content.
         playerItem.preferredForwardBufferDuration = 5
-
+        
         let avPlayer = AVPlayer(playerItem: playerItem)
         avPlayer.isMuted = true
         avPlayer.actionAtItemEnd = .none
-
+        
         // Observe when player is ready to play
         statusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
             DispatchQueue.main.async {
@@ -1534,7 +1541,7 @@ private class VideoPlayerViewModel: ObservableObject {
                 }
             }
         }
-
+        
         // Loop the video when it ends
         loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -1544,15 +1551,15 @@ private class VideoPlayerViewModel: ObservableObject {
             avPlayer?.seek(to: .zero)
             avPlayer?.play()
         }
-
-        player = avPlayer
+        
+        self.player = avPlayer
         avPlayer.play()
     }
-
+    
     func cleanup() {
         statusObserver?.invalidate()
         statusObserver = nil
-
+        
         if let observer = loopObserver {
             NotificationCenter.default.removeObserver(observer)
             loopObserver = nil
@@ -1562,7 +1569,7 @@ private class VideoPlayerViewModel: ObservableObject {
         asset = nil
         isReady = false
     }
-
+    
     deinit {
         cleanup()
     }
@@ -1573,18 +1580,18 @@ private class VideoPlayerViewModel: ObservableObject {
 struct SDUIVideoPlayerView: View {
     let urlString: String?
     let contentMode: SDUIContentMode
-
+    
     @StateObject private var viewModel = VideoPlayerViewModel()
-
+    
     var body: some View {
         ZStack {
             Color(UIColor.tertiarySystemFill)
-
+            
             if let player = viewModel.player {
                 VideoPlayerLayer(player: player, videoGravity: contentMode == .fill ? .resizeAspectFill : .resizeAspect)
                     .opacity(viewModel.isReady ? 1 : 0)
             }
-
+            
             // Show loading indicator while buffering
             if !viewModel.isReady {
                 ProgressView()
@@ -1605,15 +1612,15 @@ struct SDUIVideoPlayerView: View {
 private struct VideoPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
     let videoGravity: AVLayerVideoGravity
-
-    func makeUIView(context _: Context) -> PlayerContainerView {
+    
+    func makeUIView(context: Context) -> PlayerContainerView {
         let view = PlayerContainerView()
         view.player = player
         view.videoGravity = videoGravity
         return view
     }
-
-    func updateUIView(_ uiView: PlayerContainerView, context _: Context) {
+    
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
         uiView.player = player
         uiView.videoGravity = videoGravity
     }
@@ -1622,27 +1629,26 @@ private struct VideoPlayerLayer: UIViewRepresentable {
 /// Custom UIView that hosts an AVPlayerLayer and auto-resizes it
 private class PlayerContainerView: UIView {
     private let playerLayer = AVPlayerLayer()
-
+    
     var player: AVPlayer? {
         get { playerLayer.player }
         set { playerLayer.player = newValue }
     }
-
+    
     var videoGravity: AVLayerVideoGravity {
         get { playerLayer.videoGravity }
         set { playerLayer.videoGravity = newValue }
     }
-
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         layer.addSublayer(playerLayer)
     }
-
-    @available(*, unavailable)
-    required init?(coder _: NSCoder) {
+    
+    required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-
+    
     override func layoutSubviews() {
         super.layoutSubviews()
         playerLayer.frame = bounds
@@ -1745,13 +1751,13 @@ struct CreativeOverlayModifier: ViewModifier {
 /// // With IAP free trial: "Get 7 days of Spotify Premium"
 /// // Without IAP: "Get 1 month of Spotify Premium" (from native config)
 /// ```
-struct TemplateText: View {
+internal struct TemplateText: View {
     /// The original template string with placeholders
     let template: String
-
+    
     /// The offer context providing variable values (remote config + IAP data)
     private let context: OfferContext?
-
+    
     /// Creates a template text with the given template and context.
     ///
     /// - Parameters:
@@ -1761,7 +1767,7 @@ struct TemplateText: View {
         self.template = template
         self.context = context
     }
-
+    
     /// The resolved text with all placeholders substituted.
     ///
     /// Uses `OfferContext.allVariables` to get all template variables.
@@ -1772,10 +1778,10 @@ struct TemplateText: View {
     /// the placeholder is left unchanged in the output.
     var resolved: String {
         guard let ctx = context else { return template }
-
+        
         // Get all variables from context (remoteConfig + IAP)
         let variables = ctx.allVariables
-
+        
         // Substitute placeholders
         var result = template
         for (key, value) in variables {
@@ -1783,17 +1789,17 @@ struct TemplateText: View {
         }
         return result
     }
-
+    
     var body: some View {
         Text(resolved)
     }
-
+    
     /// Returns the resolved text as a SwiftUI Text for concatenation with other Text views.
     /// Use this when you need to combine template text with other text using `+`.
     var text: Text {
         Text(resolved)
     }
-
+    
     /// Returns the resolved text, or a fallback if the template is empty.
     func resolved(or fallback: String) -> String {
         let result = resolved
@@ -1807,15 +1813,13 @@ extension TemplateText: ExpressibleByStringLiteral {
     /// Creates a template text from a string literal (without context).
     /// Useful for default values that don't need substitution.
     init(stringLiteral value: String) {
-        template = value
-        context = nil
+        self.template = value
+        self.context = nil
     }
 }
 
 extension TemplateText: CustomStringConvertible {
-    var description: String {
-        resolved
-    }
+    var description: String { resolved }
 }
 
 // MARK: - UIValues Extension
@@ -1828,7 +1832,7 @@ extension UIValues {
     func text(_ template: String) -> TemplateText {
         TemplateText(template, context: OfferContext(uiValues: self))
     }
-
+    
     /// Creates a TemplateText from an optional template string.
     ///
     /// - Parameters:
@@ -1850,7 +1854,7 @@ extension Optional where Wrapped == UIValues {
     func text(_ template: String) -> TemplateText {
         TemplateText(template, context: OfferContext(uiValues: self))
     }
-
+    
     /// Creates a TemplateText from an optional template string.
     ///
     /// - Parameters:
@@ -1861,6 +1865,7 @@ extension Optional where Wrapped == UIValues {
         TemplateText(template ?? fallback, context: OfferContext(uiValues: self))
     }
 }
+
 
 // MARK: - Font + Tracking
 

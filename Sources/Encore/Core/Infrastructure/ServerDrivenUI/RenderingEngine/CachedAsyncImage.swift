@@ -28,7 +28,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
     /// in the active window). A failed load — placeholder branch — never
     /// fires this, so a creative that didn't render isn't recorded as a
     /// viewable. Stateless; callers dedupe at a higher layer if needed.
-    var onLoadedVisible: (() -> Void)?
+    var onLoadedVisible: (() -> Void)? = nil
 
     @State private var image: UIImage?
     @State private var isLoading = false
@@ -130,12 +130,12 @@ private struct ShimmerView: View {
     @State private var phase: CGFloat = -1
 
     var body: some View {
-        GeometryReader { _ in
+        GeometryReader { geo in
             LinearGradient(
                 colors: [
                     Color(UIColor.systemFill).opacity(0),
                     Color(UIColor.systemFill).opacity(0.3),
-                    Color(UIColor.systemFill).opacity(0),
+                    Color(UIColor.systemFill).opacity(0)
                 ],
                 startPoint: .init(x: phase, y: 0.5),
                 endPoint: .init(x: phase + 0.7, y: 0.5)

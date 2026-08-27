@@ -158,7 +158,7 @@ private struct HeaderCopyView: View {
                     .foregroundColor(accentTitleColor))
                     .font(OfferSheetStyles.titleFont)
                     .fixedSize(horizontal: false, vertical: true)
-
+                
                 Text(offerContext.subtitleText ?? "Claim an exclusive offer and get free access to all features")
                     .font(OfferSheetStyles.subtitleFont)
                     .foregroundColor(OfferSheetStyles.secondaryText)
@@ -167,7 +167,7 @@ private struct HeaderCopyView: View {
             }
         }
     }
-
+    
     private var accentTitleTextWithSpace: String {
         let text = offerContext.accentTitleText ?? " for free"
         if text.isEmpty { return text }

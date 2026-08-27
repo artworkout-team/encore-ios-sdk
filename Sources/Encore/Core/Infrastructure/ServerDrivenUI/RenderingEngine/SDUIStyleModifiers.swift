@@ -12,7 +12,7 @@ import SwiftUI
 @available(iOS 17.0, *)
 struct SDUIStyleModifier: ViewModifier {
     let style: SDUIStyle?
-
+    
     func body(content: Content) -> some View {
         content
             .modifier(SDUIContainerRelativeFrameModifier(config: style?.containerRelativeFrame))
@@ -78,6 +78,7 @@ struct SDUIFrameModifier: ViewModifier {
 struct SDUIClippedModifier: ViewModifier {
     let clipped: Bool?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if clipped == true {
             content.clipped()
@@ -91,6 +92,7 @@ struct SDUIClippedModifier: ViewModifier {
 struct SDUIFixedSizeModifier: ViewModifier {
     let fixedSize: SDUIFixedSize?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let fixedSize {
             content.fixedSize(
@@ -149,6 +151,7 @@ struct SDUISurfaceModifier: ViewModifier {
         cornerRadii != nil || (cornerRadius ?? 0) > 0
     }
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         let fill = backgroundColor?.resolved(in: appearance, values: colorValues)
         // Clip the CONTENT ONLY (never the shadow) to the rounded shape.
@@ -203,6 +206,7 @@ struct SDUIBorderModifier: ViewModifier {
     @Environment(\.sduiAppearance) private var appearance
     @Environment(\.sduiColorValues) private var colorValues
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let width = width, let color = color {
             content.overlay(
@@ -243,6 +247,7 @@ struct SDUIInnerShadowModifier: ViewModifier {
     @Environment(\.sduiAppearance) private var appearance
     @Environment(\.sduiColorValues) private var colorValues
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let s = innerShadow {
             let base = s.color.resolved(in: appearance, values: colorValues)
@@ -277,11 +282,12 @@ struct SDUIOpacityModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIClipShapeModifier: ViewModifier {
     let clipShape: SDUIClipShape?
-
+    
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let clipShape = clipShape {
             switch clipShape {
-            case let .rectangle(cornerRadius):
+            case .rectangle(let cornerRadius):
                 content.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
             case .circle:
                 content.clipShape(Circle())
@@ -298,6 +304,7 @@ struct SDUIClipShapeModifier: ViewModifier {
 struct SDUISafeAreaModifier: ViewModifier {
     let ignoresSafeArea: Bool?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if ignoresSafeArea == true {
             content.ignoresSafeArea()
@@ -314,6 +321,7 @@ struct SDUISafeAreaModifier: ViewModifier {
 struct SDUISafeAreaPaddingModifier: ViewModifier {
     let config: SDUISafeAreaPadding?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let config = config, !config.edges.isEmpty {
             content.safeAreaPadding(config.edges)
@@ -348,6 +356,7 @@ struct SDUIRootSafeAreaModifier: ViewModifier {
     /// The variant's presentation style — decides whether the root bleeds.
     let presentationStyle: SDUIPresentationStyle
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if !respectsSafeArea {
             // Opt-out: whole tree bleeds; the variant owns its insets.
@@ -377,7 +386,8 @@ struct SDUILayoutPriorityModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIContainerRelativeFrameModifier: ViewModifier {
     let config: SDUIContainerRelativeFrame?
-
+    
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let config = config {
             switch config.axis ?? .horizontal {
@@ -402,6 +412,7 @@ struct SDUIRelativeFrameModifier: ViewModifier {
     let width: CGFloat?
     let height: CGFloat?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         switch (width, height) {
         case let (w?, h?):
@@ -421,6 +432,7 @@ struct SDUIRelativeFrameModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIScaleModifier: ViewModifier {
     let scale: CGFloat?
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let scale = scale {
             content.scaleEffect(scale)
@@ -433,6 +445,7 @@ struct SDUIScaleModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIRotationModifier: ViewModifier {
     let degrees: CGFloat?
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let degrees = degrees {
             content.rotationEffect(.degrees(degrees))
@@ -445,6 +458,7 @@ struct SDUIRotationModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIOffsetModifier: ViewModifier {
     let offset: SDUIOffset?
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let offset = offset {
             content.offset(x: offset.x ?? 0, y: offset.y ?? 0)
@@ -463,6 +477,7 @@ struct SDUIGradientBorderModifier: ViewModifier {
     @Environment(\.sduiAppearance) private var appearance
     @Environment(\.sduiColorValues) private var colorValues
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let border = border, !border.colors.isEmpty {
             let colors = border.colors.map { $0.resolved(in: appearance, values: colorValues) }
@@ -493,6 +508,7 @@ struct SDUIScrollTransitionModifier: ViewModifier {
 
     @Environment(\.sduiCarouselViewportWidth) private var carouselViewportWidth
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let transition, let carouselViewportWidth {
             content.visualEffect { view, geometryProxy in
@@ -614,6 +630,7 @@ struct SDUIScrollFadeModifier: ViewModifier {
     /// `renderForEach`. `0` on the focused card, `>= 1` on the rest.
     @Environment(\.sduiScrollFadeDistance) private var distance
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         if let f = fade {
             let op = Self.scrollFadeOpacity(
@@ -658,22 +675,22 @@ extension View {
         if let behavior = behavior {
             switch behavior {
             case .viewAligned:
-                scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+                self.scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             case .paging:
-                scrollTargetBehavior(.paging)
+                self.scrollTargetBehavior(.paging)
             }
         } else {
             self
         }
     }
-
+    
     @ViewBuilder
     func applyContentMargin(_ margin: CGFloat?, axis: Axis.Set) -> some View {
-        if let margin {
+        if let margin = margin {
             if axis == .horizontal {
-                contentMargins(.horizontal, margin, for: .scrollContent)
+                self.contentMargins(.horizontal, margin, for: .scrollContent)
             } else {
-                contentMargins(.vertical, margin, for: .scrollContent)
+                self.contentMargins(.vertical, margin, for: .scrollContent)
             }
         } else {
             self

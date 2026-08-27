@@ -61,3 +61,4 @@ struct OfferSheetStyles {
     static let instructionBulletFont = Font.system(size: 16, weight: .regular)
     static let closeButtonFont = Font.system(size: 15, weight: .semibold)
 }
+

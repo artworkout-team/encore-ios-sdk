@@ -45,7 +45,7 @@ internal final class OfferSheetCoordinator {
     }
 
     private static var current: ActivePresentation?
-    private var resultHandler: ((PresentationResult) -> Void)?
+    private var resultHandler: (@MainActor @Sendable (PresentationResult) -> Void)?
     private var viewControllerContinuation: CheckedContinuation<UIViewController?, Never>?
     private let presentationId: String
     internal let placementId: String
@@ -119,7 +119,7 @@ internal final class OfferSheetCoordinator {
         placementLabel: String? = nil,
         useCase: UseCase = .reduceChurn,
         copyOverrides: [String: String] = [:],
-        resume: @escaping @MainActor (PresentationResult) -> Void
+        resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
         switch makeAttempt(
             placementId: placementId,
@@ -323,7 +323,7 @@ internal final class OfferSheetCoordinator {
     /// Starts the normal loading pipeline but resolves once its controller is ready.
     /// The terminal result is delivered later, after the host removes the controller.
     private func buildViewController(
-        onCompletion: @escaping @MainActor (PresentationResult) -> Void
+        onCompletion: @escaping @MainActor @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
         await withCheckedContinuation { continuation in
             self.resultHandler = onCompletion
@@ -593,6 +593,9 @@ internal final class OfferSheetCoordinator {
             }
             self.viewControllerContinuation = nil
             viewControllerContinuation.resume(returning: viewController)
+            #if DEBUG
+            viewController.warnIfRetainedWithoutPresentation()
+            #endif
         }
     }
 

@@ -35,7 +35,7 @@ public protocol PlacementBuilderProtocol {
     /// If the placement cannot be built, this returns `nil` and still invokes
     /// `resume` with the corresponding `.notPresented` result.
     func makeViewController(
-        resume: @escaping @MainActor (PresentationResult) -> Void
+        resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController?
 
     /// Warms this placement's offers so `show()` opens the sheet without a
@@ -88,9 +88,9 @@ public extension PlacementBuilderProtocol {
     }
 
     func makeViewController(
-        resume: @escaping @MainActor (PresentationResult) -> Void
+        resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
-        resume(.notPresented(.notConfigured))
+        resume(.notPresented(.viewControllerUnavailable))
         return nil
     }
 
@@ -140,7 +140,7 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
     }
 
     func makeViewController(
-        resume: @escaping @MainActor (PresentationResult) -> Void
+        resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
         Logger.debug(.presentation, "makeViewController(\(id)) — preparing")
         onLoadingStateChangeCallback?(true)

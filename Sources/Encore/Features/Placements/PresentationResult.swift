@@ -49,6 +49,8 @@ public typealias NotGrantedReason = DismissReason
 /// Why no offer sheet ever appeared. Errors are values — `show()` never throws.
 public enum NotPresentedReason: Equatable, Sendable {
     case notConfigured
+    /// The builder implementation does not provide a host-owned view controller.
+    case viewControllerUnavailable
     case alreadyPresenting
     /// Requires iOS 17+.
     case unsupportedOS
@@ -72,6 +74,7 @@ internal extension NotPresentedReason {
     var wireValue: String {
         switch self {
         case .notConfigured:      return "not_configured"
+        case .viewControllerUnavailable: return "view_controller_unavailable"
         case .alreadyPresenting:  return "already_presenting"
         case .unsupportedOS:      return "unsupported_ios"
         case .noOffers:           return "no_offer_available"

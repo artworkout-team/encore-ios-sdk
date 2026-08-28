@@ -26,6 +26,23 @@ final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
             dismiss(animated: true)
         }
     }
+
+    #if DEBUG
+    func warnIfRetainedWithoutPresentation() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self,
+                  viewIfLoaded?.window == nil,
+                  navigationController == nil,
+                  presentingViewController == nil else { return }
+            Logger.warn(
+                .presentation,
+                "Host-owned offer controller was retained without being pushed or presented. "
+                    + "Present it immediately after makeViewController() returns, or release it to avoid blocking future placements."
+            )
+        }
+    }
+    #endif
 }
 
 @MainActor

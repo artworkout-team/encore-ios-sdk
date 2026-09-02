@@ -16,12 +16,11 @@ struct OfferSheetView: View {
     @StateObject private var sduiContext: SDUIContext
     @Environment(\.dismiss) var dismiss
 
-    /// SDUI config from SDUIConfigurationManager, resolved for this
-    /// presentation's use case (pre-fetched on identify for `.reduceChurn`, lazily
-    /// on first presentation for every other use case).
-    private var config: SDUIConfig? {
-        sduiConfigManager?.layout(for: viewModel.offerContext.useCase)
-    }
+    /// Immutable SDUI snapshot for this presentation. Resolving it once keeps
+    /// the recursive config tree out of repeated SwiftUI body evaluation and
+    /// prevents a late config arrival from replacing the visible hierarchy.
+    private let config: SDUIConfig?
+    private let variantId: String?
 
     /// Computed property to determine the preferred color scheme based on appearance mode
     private var preferredColorScheme: ColorScheme? {
@@ -49,6 +48,8 @@ struct OfferSheetView: View {
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
+        config = sduiConfigManager?.layout(for: offerContext.useCase)
+        variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
 
         let handler = SheetDismissHandler(onCompletion: onCompletion, initiallyPurchased: initiallyPurchased)
         _viewModel = StateObject(wrappedValue: OfferSheetViewModel(
@@ -101,20 +102,12 @@ struct OfferSheetView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: viewModel.verificationState != .idle)
-        .transaction { transaction in
-            // Only allow animations for the verification overlay —
-            // suppress inherited animations for SDUI content to prevent
-            // flash/opacity shifts on card selection and state transitions.
-            if viewModel.verificationState == .idle {
-                transaction.animation = nil
-            }
-        }
         .onAppear {
             setupContext()
 
             // Set variant metadata for analytics
             viewModel.setVariantMetadata(
-                variantId: sduiConfigManager?.variantId(for: viewModel.offerContext.useCase),
+                variantId: variantId,
                 context: sduiContext
             )
 
@@ -180,7 +173,7 @@ struct OfferSheetView: View {
         ))
         // Expose the active Appearance to ViewModifiers (e.g. SDUIBackgroundModifier)
         // so `{"appearance": "accent"}` in variant JSON resolves to the per-app brand color.
-        .environment(\.sduiAppearance, Appearance(from: sduiContext.offerContext.uiValues))
+        .environment(\.sduiAppearance, sduiContext.appearance)
         .presentationDetents(detentsForCurrentState(loadedConfig))
         .applyCornerRadius(loadedConfig.cornerRadius)
         .presentationDragIndicator(loadedConfig.showDragIndicator == true ? .visible : .hidden)

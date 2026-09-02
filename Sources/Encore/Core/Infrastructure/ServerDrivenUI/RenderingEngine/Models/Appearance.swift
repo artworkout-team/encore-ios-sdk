@@ -70,15 +70,15 @@ enum SDUIAppearanceColor: String, Decodable {
 
 // MARK: - Appearance
 
-/// Resolved theme for the current app session. One instance per render of the
-/// SDUI tree. Built from the backend's `UIValues` at `OfferSheetView` render
+/// Resolved theme for the current app session. One immutable instance per
+/// presentation. Built from the backend's `UIValues` when the SDUI context
 /// time, with per-token fallbacks so partially-configured apps (or no remote
 /// config at all) still render correctly.
 ///
 /// Injected into the SwiftUI environment via `\.sduiAppearance` so any
 /// `ViewModifier` can resolve `SDUIColor.appearance(_)` without explicit
 /// plumbing.
-struct Appearance {
+final class Appearance: Equatable, Sendable {
     let accent: Color
     let onAccent: Color
     let accentTitle: Color
@@ -89,6 +89,10 @@ struct Appearance {
     let border: Color
     let muted: Color
     let error: Color
+
+    static func == (lhs: Appearance, rhs: Appearance) -> Bool {
+        lhs === rhs
+    }
 
     /// Lookup — the *only* place the enum-to-stored-property mapping lives.
     /// Adding a token = add a case here.
@@ -151,12 +155,7 @@ struct Appearance {
         self.error = fallback.error
     }
 
-}
-
-// Memberwise init kept in an extension: declaring `init(from:)` above
-// suppresses Swift's synthesized memberwise init, and `.default` + tests
-// rely on the label-per-arg form.
-extension Appearance {
+    /// Explicit memberwise initializer used by `.default` and tests.
     init(
         accent: Color,
         onAccent: Color,
@@ -215,29 +214,6 @@ extension EnvironmentValues {
     var sduiColorValues: [String: String] {
         get { self[SDUIColorValuesKey.self] }
         set { self[SDUIColorValuesKey.self] = newValue }
-    }
-}
-
-/// SwiftUI environment carrying the active render `SDUIContext` and the
-/// current row `Offer`, so generic `ViewModifier`s can render sub-elements
-/// (`style.overlay`, `style.backgroundElement`) through `SDUIElementRenderer`.
-/// Set per element in the renderer's `body`.
-@available(iOS 17.0, *)
-struct SDUIRenderEnvironment {
-    weak var context: SDUIContext?
-    var offer: Offer?
-}
-
-@available(iOS 17.0, *)
-private struct SDUIRenderEnvironmentKey: EnvironmentKey {
-    static let defaultValue = SDUIRenderEnvironment()
-}
-
-@available(iOS 17.0, *)
-extension EnvironmentValues {
-    var sduiRenderEnvironment: SDUIRenderEnvironment {
-        get { self[SDUIRenderEnvironmentKey.self] }
-        set { self[SDUIRenderEnvironmentKey.self] = newValue }
     }
 }
 

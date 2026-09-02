@@ -48,7 +48,7 @@ public protocol EncoreProtocol: AnyObject {
 /// progressing app UI.
 @MainActor
 public final class Encore: EncoreProtocol {
-    internal static let sdkVersion: String = "2.0.2-artworkout.1"
+    internal static let sdkVersion: String = "2.0.2"
     // Write-once references (assigned in configure(), read pervasively from
     // nonisolated accessors). Safe: Swift reference assignment is atomic and
     // these never change after configuration.

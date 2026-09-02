@@ -546,14 +546,11 @@ internal final class OfferSheetCoordinator {
 
         let presentationStyle = sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
         let presentationHost: OfferSheetPresentationHost
-        let controllerBox: ControllerBox?
         switch presentationTarget {
         case .managedWindow:
             presentationHost = .managedWindow(presentationStyle)
-            controllerBox = nil
         case .hostController:
             presentationHost = .viewController
-            controllerBox = ControllerBox()
         }
         let containerView = OfferSheetContainer(
             offerResponse: response,
@@ -565,9 +562,6 @@ internal final class OfferSheetCoordinator {
             initialStateOverride: initialStateOverride,
             initiallyPurchased: initiallyPurchased,
             presentationHost: presentationHost,
-            onDismissRequest: {
-                (controllerBox?.value as? OfferSheetViewController)?.requestDismissal()
-            },
             onCompletion: { [weak self] result in
                 self?.complete(result)
             }
@@ -592,8 +586,7 @@ internal final class OfferSheetCoordinator {
         case .hostController:
             let controller = OfferSheetViewController(rootView: containerView)
             controller.overrideUserInterfaceStyle = offerContext.appearanceMode.userInterfaceStyle
-            let box = controllerBox ?? ControllerBox()
-            box.value = controller
+            let box = ControllerBox(controller)
             Self.current = ActivePresentation(coordinator: self, phase: .presentingController(controller: box))
             let continuation = controllerContinuation
             controllerContinuation = nil

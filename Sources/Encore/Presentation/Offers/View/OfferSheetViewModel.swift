@@ -98,11 +98,9 @@ class OfferSheetViewModel: ObservableObject {
     /// already a non-owning edge).
     private weak var sduiContext: SDUIContext?
 
-    /// Stable container-owned dismissal callback. Using SwiftUI's
-    /// `@Environment(\.dismiss)` here makes the offer view observe a
-    /// continuously-changing `DismissAction` on iOS 17, which can trap the
-    /// presentation in a root-view invalidation loop.
-    private var onDismiss: (() -> Void)?
+    /// Captured from the view's `@Environment(\.dismiss)` so action handlers
+    /// can dismiss the sheet without routing through a view method.
+    private var dismiss: DismissAction?
 
     /// Lead payload stashed on submit; fires to the outbox only after IAP
     /// succeeds via `flushPendingLead`.
@@ -216,12 +214,12 @@ class OfferSheetViewModel: ObservableObject {
         subscribeToLifecycle()
     }
 
-    /// Register the SDUIContext and stable dismiss callback. Action-handling closures
+    /// Register the SDUIContext and dismiss action. Action-handling closures
     /// stored on the context capture `[weak self]` — no cycle to break on
     /// deinit, so no deinit cleanup needed.
-    func bind(sduiContext: SDUIContext, onDismiss: @escaping () -> Void) {
+    func bind(sduiContext: SDUIContext, dismiss: DismissAction) {
         self.sduiContext = sduiContext
-        self.onDismiss = onDismiss
+        self.dismiss = dismiss
     }
 
     /// Set variant metadata on both self and context
@@ -621,7 +619,7 @@ class OfferSheetViewModel: ObservableObject {
             // Staged funnel facts (e.g. a claim) ride along automatically;
             // this only records how the sheet ended.
             completionHandler.stageDismissal(.userTappedClose)
-            onDismiss?()
+            dismiss?()
         case .claimOffer:
             if let offer {
                 // Capture the post-claim state (if authored) before the claim
@@ -692,7 +690,7 @@ class OfferSheetViewModel: ObservableObject {
         if target == "close" {
             Logger.info("\(logPrefix) Closing sheet")
             completionHandler.stageDismissal(.dismissed)
-            onDismiss?()
+            dismiss?()
         } else {
             Logger.info("\(logPrefix) Transitioning to state: \(target)")
             sduiContext.setState(target)

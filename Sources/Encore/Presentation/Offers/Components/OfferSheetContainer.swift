@@ -67,7 +67,6 @@ struct OfferSheetContainer: View {
     /// sheet appeared — staged as the `.purchased` result floor.
     var initiallyPurchased: Bool = false
     let presentationHost: OfferSheetPresentationHost
-    let onDismissRequest: () -> Void
     let onCompletion: (Result<PresentationResult, EncoreError>) -> Void
     
     @State private var presentationState: PresentationState?
@@ -126,16 +125,6 @@ struct OfferSheetContainer: View {
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
                 presentationHost: presentationHost,
-                onDismiss: {
-                    switch presentationHost {
-                    case .managedWindow(.sheet):
-                        presentationState = nil
-                    case .managedWindow(.fullScreenCover):
-                        break
-                    case .viewController:
-                        onDismissRequest()
-                    }
-                },
                 onCompletion: { result in
                     handleOfferSheetCompletion(result)
                 }

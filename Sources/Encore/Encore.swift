@@ -48,7 +48,7 @@ public protocol EncoreProtocol: AnyObject {
 /// progressing app UI.
 @MainActor
 public final class Encore: EncoreProtocol {
-    internal static let sdkVersion: String = "2.0.2"
+    internal static let sdkVersion: String = "2.0.2-artworkout.1"
     // Write-once references (assigned in configure(), read pervasively from
     // nonisolated accessors). Safe: Swift reference assignment is atomic and
     // these never change after configuration.
@@ -58,7 +58,7 @@ public final class Encore: EncoreProtocol {
 
     public static let shared = Encore()
 
-    /// Whether this device can present Encore offers at all — the SDK's iOS 16
+    /// Whether this device can present Encore offers at all — the SDK's iOS 17
     /// floor. Read it BEFORE you commit a surface to a placement: on `false`,
     /// `show()` resolves `.notPresented(.unsupportedOS)` without any UI, so the
     /// host should fall through to its own. Configuration-independent, so it is
@@ -69,7 +69,7 @@ public final class Encore: EncoreProtocol {
     /// let result = await Encore.placement("paywall_decline").show()
     /// ```
     public nonisolated static var isSupported: Bool {
-        if #available(iOS 16.0, *) { true } else { false }
+        if #available(iOS 17.0, *) { true } else { false }
     }
 
     /// Controls whether the claim CTA on offer cards is tappable.

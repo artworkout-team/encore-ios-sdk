@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Main Sheet View
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
@@ -78,7 +78,7 @@ struct OfferSheetView: View {
 
     var body: some View {
         Group {
-            if #available(iOS 17.0, *), let loadedConfig = config {
+            if let loadedConfig = config {
                 sduiContent(loadedConfig)
             } else {
                 fallbackContent

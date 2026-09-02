@@ -36,7 +36,7 @@ enum OfferSheetPresentationHost {
 ///
 /// This is a pure SwiftUI view with no UIKit dependencies. Its host owns the
 /// surrounding window or view-controller navigation.
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct OfferSheetContainer: View {
     
     // MARK: - Presentation State
@@ -160,8 +160,8 @@ struct OfferSheetContainer: View {
             }
             .presentationDetents([.fraction(0.32)])
             .presentationDragIndicator(.hidden)
-            .compatiblePresentationCornerRadius(OfferSheetStyles.cornerRadius)
-            .compatiblePresentationBackground(OfferSheetStyles.backgroundColor)
+            .presentationCornerRadius(OfferSheetStyles.cornerRadius)
+            .presentationBackground(OfferSheetStyles.backgroundColor)
         }
     }
     

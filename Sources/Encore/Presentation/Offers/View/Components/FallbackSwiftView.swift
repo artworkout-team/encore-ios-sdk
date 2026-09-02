@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Fallback Offer Sheet View
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct FallbackOfferSheetView: View {
     @ObservedObject var viewModel: OfferSheetViewModel
     let preferredColorScheme: ColorScheme?
@@ -36,7 +36,7 @@ struct FallbackOfferSheetView: View {
             mainContent
         }
         .presentationDetents([.fraction(0.48), .fraction(0.95)])
-        .compatiblePresentationCornerRadius(OfferSheetStyles.cornerRadius)
+        .presentationCornerRadius(OfferSheetStyles.cornerRadius)
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(false)
         .preferredColorScheme(preferredColorScheme)
@@ -46,7 +46,7 @@ struct FallbackOfferSheetView: View {
             }
             .presentationDetents([.fraction(0.95)])
             .presentationDragIndicator(.visible)
-            .compatiblePresentationCornerRadius(OfferSheetStyles.safariCornerRadius)
+            .presentationCornerRadius(OfferSheetStyles.safariCornerRadius)
             .interactiveDismissDisabled(false)
             .onDisappear {
                 Logger.info(.presentation, "Safari dismissed")
@@ -101,7 +101,7 @@ struct FallbackOfferSheetView: View {
 
 // MARK: - Sheet Header
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct SheetHeaderView: View {
     let offerContext: OfferContext
     let onClose: () -> Void
@@ -134,7 +134,7 @@ struct SheetHeaderView: View {
     }
 }
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 private struct HeaderCopyView: View {
     let offerContext: OfferContext
 
@@ -192,7 +192,7 @@ private struct HeaderCopyView: View {
 
 // MARK: - Instructions
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct InstructionsView: View {
     let offer: Offer
     
@@ -231,7 +231,7 @@ struct InstructionsView: View {
 
 // MARK: - Carousel
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct CarouselView: View {
     let offers: [Offer]
     @Binding var currentIndex: Int?
@@ -240,23 +240,13 @@ struct CarouselView: View {
     let onOfferTap: @MainActor (Offer) -> Void
 
     var body: some View {
-        if #available(iOS 17.0, *) {
-            ScrollOfferPager(
-                offers: offers,
-                currentIndex: $currentIndex,
-                offerContext: offerContext,
-                isClaimDisabled: isClaimDisabled,
-                onOfferTap: onOfferTap
-            )
-        } else {
-            TabOfferPager(
-                offers: offers,
-                currentIndex: $currentIndex,
-                offerContext: offerContext,
-                isClaimDisabled: isClaimDisabled,
-                onOfferTap: onOfferTap
-            )
-        }
+        ScrollOfferPager(
+            offers: offers,
+            currentIndex: $currentIndex,
+            offerContext: offerContext,
+            isClaimDisabled: isClaimDisabled,
+            onOfferTap: onOfferTap
+        )
     }
 }
 
@@ -330,48 +320,5 @@ private struct OfferPageCenterPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
         value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
-    }
-}
-
-@available(iOS 16.0, *)
-private struct TabOfferPager: View {
-    let offers: [Offer]
-    @Binding var currentIndex: Int?
-    let offerContext: OfferContext
-    let isClaimDisabled: Bool
-    let onOfferTap: @MainActor (Offer) -> Void
-
-    var body: some View {
-        TabView(selection: $currentIndex) {
-            ForEach(Array(offers.enumerated()), id: \.element.id) { index, offer in
-                OfferCardView(offer: offer, offerContext: offerContext, isClaimDisabled: isClaimDisabled) {
-                    onOfferTap(offer)
-                }
-                .padding(.horizontal, OfferSheetStyles.carouselMargin)
-                .tag(Optional(index))
-            }
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-    }
-}
-
-@available(iOS 16.0, *)
-extension View {
-    @ViewBuilder
-    func compatiblePresentationCornerRadius(_ radius: CGFloat?) -> some View {
-        if #available(iOS 16.4, *) {
-            self.presentationCornerRadius(radius)
-        } else {
-            self
-        }
-    }
-
-    @ViewBuilder
-    func compatiblePresentationBackground(_ color: Color) -> some View {
-        if #available(iOS 16.4, *) {
-            self.presentationBackground(color)
-        } else {
-            self
-        }
     }
 }

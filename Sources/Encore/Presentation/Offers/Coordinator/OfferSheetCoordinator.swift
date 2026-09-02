@@ -17,6 +17,17 @@ private final class WeakBox<Value: AnyObject> {
     #endif
 }
 
+/// Weak handle to a host-owned controller plus evidence that it entered the
+/// host hierarchy at least once.
+private final class ControllerBox {
+    weak var value: UIViewController?
+    var wasPlaced = false
+
+    init(_ value: UIViewController? = nil) {
+        self.value = value
+    }
+}
+
 @MainActor
 internal final class OfferSheetCoordinator {
 
@@ -28,7 +39,7 @@ internal final class OfferSheetCoordinator {
         /// Carries the owned window — the liveness evidence the gate verifies.
         case presentingWindow(window: WeakBox<UIWindow>)
         /// Carries the host-owned controller while it is active.
-        case presentingViewController(viewController: WeakBox<UIViewController>)
+        case presentingViewController(viewController: ControllerBox)
         case finished
     }
 
@@ -136,10 +147,11 @@ internal final class OfferSheetCoordinator {
                 presentationId: presentationId,
                 useCase: useCase
             )
-            resume(result)
+            Task { @MainActor in resume(result) }
             return nil
 
         case .ready(let coordinator):
+            guard #available(iOS 17.0, *) else { return nil }
             return await coordinator.buildViewController { result in
                 publish(
                     result,
@@ -201,6 +213,31 @@ internal final class OfferSheetCoordinator {
         }
     }
 
+    /// Whether the active presentation still has a live host. Before a
+    /// host-owned controller is placed, retaining it is enough; after it has
+    /// entered a hierarchy, leaving that hierarchy ends the flow.
+    private static func structuralLiveness(of phase: Phase) -> Bool? {
+        switch phase {
+        case .loading, .finished:
+            return nil
+        case .presentingWindow(let box):
+            return box.value.map { $0.windowScene != nil && !$0.isHidden } ?? false
+        case .presentingViewController(let box):
+            guard let viewController = box.value else { return false }
+            if isHeldByHost(viewController) {
+                box.wasPlaced = true
+                return true
+            }
+            return !box.wasPlaced
+        }
+    }
+
+    internal static func isHeldByHost(_ viewController: UIViewController) -> Bool {
+        viewController.viewIfLoaded?.window != nil
+            || viewController.parent != nil
+            || viewController.presentingViewController != nil
+    }
+
     private enum Attempt {
         case ready(OfferSheetCoordinator)
         case resolved(PresentationResult, presentationId: String)
@@ -233,7 +270,7 @@ internal final class OfferSheetCoordinator {
         // host reads beforehand can never drift apart.
         guard Encore.isSupported else {
             let version = UIDevice.current.systemVersion
-            Logger.debug("SwiftUI offers require iOS 16+. Current: \(version)")
+            Logger.debug("SwiftUI offers require iOS 17+. Current: \(version)")
             enqueueDiagnostic(.showAborted(reason: .unsupportedOS, placementId: placementLabel, distinctId: EventEnvelope.resolveDistinctId(), variantId: variantId, useCase: useCase, presentationId: presentationId, iosVersion: version))
             return .resolved(.notPresented(.unsupportedOS), presentationId: presentationId)
         }
@@ -246,31 +283,16 @@ internal final class OfferSheetCoordinator {
 
         // Liveness guarantee: every flow resolves on a real event — its own
         // completion, window teardown, or reconciliation at the next present().
-        if let active = current {
-            let structurallyLive: Bool?
-            switch active.phase {
-            case .loading, .finished:
-                structurallyLive = nil
-            case .presentingWindow(let box):
-                structurallyLive = box.value.map { $0.windowScene != nil && !$0.isHidden } ?? false
-            case .presentingViewController(let box):
-                structurallyLive = box.value.map {
-                    $0.viewIfLoaded?.window != nil
-                        || $0.navigationController != nil
-                        || $0.presentingViewController != nil
-                } ?? false
-            }
-            if let structurallyLive {
+        if let active = current, let structurallyLive = structuralLiveness(of: active.phase) {
             #if DEBUG
-                let isLive = _livenessOverride ?? structurallyLive
+            let isLive = _livenessOverride ?? structurallyLive
             #else
-                let isLive = structurallyLive
+            let isLive = structurallyLive
             #endif
-                if !isLive {
-                    Logger.warn(.presentation, "Dead presentation host detected — reconciling and continuing")
-                    active.coordinator.complete(.success(.presented(dismissal: .interrupted)))
-                    current = nil
-                }
+            if !isLive {
+                Logger.warn(.presentation, "Dead presentation host detected — reconciling and continuing")
+                active.coordinator.complete(.success(.presented(dismissal: .interrupted)))
+                current = nil
             }
         }
 
@@ -322,6 +344,7 @@ internal final class OfferSheetCoordinator {
 
     /// Starts the normal loading pipeline but resolves once its controller is ready.
     /// The terminal result is delivered later, after the host removes the controller.
+    @available(iOS 17.0, *)
     private func buildViewController(
         onCompletion: @escaping @MainActor @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
@@ -465,7 +488,7 @@ internal final class OfferSheetCoordinator {
                     guard let iapProductIdForPurchase = iapProductId else {
                         Logger.warn(.iap, "triggerIAPFirst is true but no iapProductId configured")
                         sduiConfigManager?.useFallbackConfig(for: useCase, reason: "No iapProductId for triggerIAPFirst")
-                        if #available(iOS 16.0, *) {
+                        if #available(iOS 17.0, *) {
                             self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
                         }
                         return
@@ -476,7 +499,7 @@ internal final class OfferSheetCoordinator {
 
                     if outcome == .purchased {
                         Logger.info(.iap, "Purchase successful - showing offers")
-                        if #available(iOS 16.0, *) {
+                        if #available(iOS 17.0, *) {
                             // The purchase already happened — stage it so the
                             // record carries it however the sheet ends.
                             self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil, initiallyPurchased: true)
@@ -497,7 +520,7 @@ internal final class OfferSheetCoordinator {
                     return
                 }
 
-                if #available(iOS 16.0, *) {
+                if #available(iOS 17.0, *) {
                     self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
                 }
             } catch let error as EncoreError {
@@ -520,7 +543,7 @@ internal final class OfferSheetCoordinator {
         Self.current = ActivePresentation(coordinator: self, phase: .loading(task: task))
     }
 
-    @available(iOS 16.0, *)
+    @available(iOS 17.0, *)
     private func presentOfferSheet(response: OfferResponse, userId: String, offerContext: OfferContext, initialStateOverride: String?, initiallyPurchased: Bool = false) {
         // The flow may already have resolved — presenting now would leak a
         // presentation host nobody owns or tears down.
@@ -582,9 +605,10 @@ internal final class OfferSheetCoordinator {
             let viewController = OfferSheetViewController(rootView: containerView)
             viewController.overrideUserInterfaceStyle = offerContext.appearanceMode.userInterfaceStyle
             dismissalRelay?.viewController = viewController
+            let viewControllerBox = ControllerBox(viewController)
             Self.current = ActivePresentation(
                 coordinator: self,
-                phase: .presentingViewController(viewController: WeakBox(viewController))
+                phase: .presentingViewController(viewController: viewControllerBox)
             )
             guard let viewControllerContinuation else {
                 Logger.error(.integration(.notConfigured), context: .presentOfferInitialization)
@@ -593,9 +617,24 @@ internal final class OfferSheetCoordinator {
             }
             self.viewControllerContinuation = nil
             viewControllerContinuation.resume(returning: viewController)
-            #if DEBUG
-            viewController.warnIfRetainedWithoutPresentation()
-            #endif
+            observePlacement(viewController, box: viewControllerBox)
+        }
+    }
+
+    @available(iOS 17.0, *)
+    private func observePlacement(_ viewController: OfferSheetViewController, box: ControllerBox) {
+        Task { [weak self, weak viewController] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, let viewController, self.resultHandler != nil else { return }
+            guard !Self.isHeldByHost(viewController) else {
+                box.wasPlaced = true
+                return
+            }
+            Logger.warn(
+                .presentation,
+                "makeViewController(\(self.placementId)) returned a controller that was never pushed or presented. "
+                    + "This placement stays active, so the next show() reports alreadyPresenting."
+            )
         }
     }
 

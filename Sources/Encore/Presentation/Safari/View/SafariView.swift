@@ -20,7 +20,7 @@ typealias SafariTrackingHandler = (SafariTrackingEvent) -> Void
 
 // MARK: - Safari View
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct SafariView: UIViewControllerRepresentable {
     let url: URL
     var onTrackingEvent: SafariTrackingHandler?
@@ -113,4 +113,3 @@ struct SafariURLWrapper: Identifiable {
     let id = UUID()
     let url: URL
 }
-

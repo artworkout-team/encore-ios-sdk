@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct OfferCardView: View {
     let offer: Offer
     let offerContext: OfferContext
@@ -103,4 +103,3 @@ struct OfferCardView: View {
         .shadow(color: shadowColor, radius: 4)
     }
 }
-

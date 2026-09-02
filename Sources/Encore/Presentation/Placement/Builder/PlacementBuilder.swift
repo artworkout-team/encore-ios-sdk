@@ -90,7 +90,11 @@ public extension PlacementBuilderProtocol {
     func makeViewController(
         resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
-        resume(.notPresented(.viewControllerUnavailable))
+        Task { @MainActor in
+            resume(.notPresented(.error(.domain(
+                "This PlacementBuilderProtocol conformer does not implement makeViewController"
+            ))))
+        }
         return nil
     }
 

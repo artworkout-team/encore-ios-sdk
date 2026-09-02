@@ -11,7 +11,7 @@ internal enum VerificationPollResult {
 }
 
 @MainActor
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 internal final class VerificationPoller {
     private let transactionId: String
     private let timeout: TimeInterval

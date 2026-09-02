@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 @MainActor
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -10,7 +10,7 @@ final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
     }
 
     func requestDismissal() {
-        if let navigationController {
+        if let navigationController, parent === navigationController {
             guard navigationController.topViewController === self else { return }
             if navigationController.viewControllers.count > 1 {
                 navigationController.popViewController(animated: true)
@@ -24,29 +24,19 @@ final class OfferSheetViewController: UIHostingController<OfferSheetContainer> {
 
         if presentingViewController != nil {
             dismiss(animated: true)
+            return
         }
-    }
 
-    #if DEBUG
-    func warnIfRetainedWithoutPresentation() {
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard let self,
-                  viewIfLoaded?.window == nil,
-                  navigationController == nil,
-                  presentingViewController == nil else { return }
-            Logger.warn(
-                .presentation,
-                "Host-owned offer controller was retained without being pushed or presented. "
-                    + "Present it immediately after makeViewController() returns, or release it to avoid blocking future placements."
-            )
+        if parent != nil {
+            willMove(toParent: nil)
+            view.removeFromSuperview()
+            removeFromParent()
         }
     }
-    #endif
 }
 
 @MainActor
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 final class OfferSheetViewControllerDismissalRelay {
     weak var viewController: OfferSheetViewController?
 

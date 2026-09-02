@@ -6,7 +6,7 @@ import Foundation
 /// Stages funnel facts during a presentation and assembles the final
 /// `PresentationResult` exactly once when the sheet ends.
 @MainActor
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 class SheetDismissHandler {
     private var completion: ((Result<PresentationResult, EncoreError>) -> Void)?
     private var advertiser: AdvertiserOutcome = .notAttempted

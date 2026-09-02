@@ -5,7 +5,7 @@
 
 import SwiftUI
 
-@available(iOS 16.0, *)
+@available(iOS 17.0, *)
 struct OfferSheetStyles {
     // MARK: - Colors (Dark Mode Adaptive)
     
@@ -61,4 +61,3 @@ struct OfferSheetStyles {
     static let instructionBulletFont = Font.system(size: 16, weight: .regular)
     static let closeButtonFont = Font.system(size: 15, weight: .semibold)
 }
-

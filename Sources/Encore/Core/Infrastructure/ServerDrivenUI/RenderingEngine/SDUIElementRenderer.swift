@@ -573,13 +573,39 @@ struct SDUIElementRenderer: View {
         }
     }
 
+    /// A carousel's offer loop must be the target HStack's direct dynamic
+    /// content. Rendering it through a generic `SDUIElementRenderer` wrapper
+    /// makes SwiftUI register the whole loop as one target.
+    private static func directOfferLoop(in config: SDUIStack) -> SDUIForEach? {
+        guard config.style?.scrollTargetLayout == true,
+              config.children.count == 1,
+              case .forEach(let loop) = config.children[0],
+              case .offers = loop.dataSource
+        else { return nil }
+        return loop
+    }
+
     @ViewBuilder
     private func renderHStack(_ config: SDUIStack) -> some View {
         let alignment = config.alignment?.verticalAlignment ?? .center
         let spacing = config.spacing ?? 0
         let hasScrollTargetLayout = config.style?.scrollTargetLayout == true
 
-        if config.lazy == true {
+        if let offerLoop = Self.directOfferLoop(in: config) {
+            if config.lazy == true {
+                LazyHStack(alignment: alignment, spacing: spacing) {
+                    renderOfferItems(offerLoop)
+                }
+                .scrollTargetLayout()
+                .modifier(SDUIStyleModifier(style: config.style))
+            } else {
+                HStack(alignment: alignment, spacing: spacing) {
+                    renderOfferItems(offerLoop)
+                }
+                .scrollTargetLayout()
+                .modifier(SDUIStyleModifier(style: config.style))
+            }
+        } else if config.lazy == true {
             if hasScrollTargetLayout {
                 LazyHStack(alignment: alignment, spacing: spacing) {
                     ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
@@ -693,38 +719,37 @@ struct SDUIElementRenderer: View {
     
     @ViewBuilder
     private func renderScrollView(_ config: SDUIScrollView) -> some View {
-        let axis = config.axis?.axis ?? .vertical
-        let scrollAxis = config.axis ?? .vertical
-        // One flag for both the layout and the position binding, deliberately:
-        // a scroll view may only drive `currentIndex` if it also has the scroll
-        // target layout that lets SwiftUI resolve a position.
-        let hasScrollTarget = Self.tracksCarouselPosition(config)
-        let centersItems = Self.centersSnappedItems(config)
+        if #available(iOS 18.0, *) {
+            let axis = config.axis?.axis ?? .vertical
+            let scrollAxis = config.axis ?? .vertical
+            let hasScrollTarget = Self.tracksCarouselPosition(config)
+            let centersItems = Self.centersSnappedItems(config)
 
-        // Build scroll view with conditional modifiers
-        ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
-            if hasScrollTarget {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
-                    .scrollTargetLayout()
-                    .environment(\.sduiMeasuresCarouselItemWidth, centersItems)
-            } else {
-                SDUIElementRenderer(element: config.content, context: context, offer: offer)
+            ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
+                if hasScrollTarget {
+                    SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                        .environment(\.sduiMeasuresCarouselItemWidth, centersItems)
+                } else {
+                    SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                }
             }
+            .applyScrollTargetBehavior(config.scrollTargetBehavior)
+            .applyScrollContentMargins(
+                config.contentMargins,
+                axis: axis,
+                centersItems: centersItems,
+                scrollTarget: { [context] in context.focusedIndex }
+            )
+            .modifier(SDUICarouselPositionModifier(
+                context: context,
+                axis: scrollAxis,
+                isEnabled: hasScrollTarget
+            ))
+            .scrollClipDisabled(true)
+            .modifier(SDUIStyleModifier(style: config.style))
+        } else {
+            SDUIIOS17ScrollViewRenderer(config: config, context: context, offer: offer)
         }
-        .applyScrollTargetBehavior(config.scrollTargetBehavior)
-        .applyScrollContentMargins(
-            config.contentMargins,
-            axis: axis,
-            centersItems: centersItems,
-            scrollTarget: { [context] in context.focusedIndex }
-        )
-        .modifier(SDUICarouselPositionModifier(
-            context: context,
-            axis: scrollAxis,
-            isEnabled: hasScrollTarget
-        ))
-        .scrollClipDisabled(true)
-        .modifier(SDUIStyleModifier(style: config.style))
     }
 
     /// Whether this scroll view owns the carousel's `currentIndex`.
@@ -755,49 +780,7 @@ struct SDUIElementRenderer: View {
     private func renderForEach(_ config: SDUIForEach) -> some View {
         switch config.dataSource {
         case .offers:
-            let limitedOffers = config.limit.map { Array(context.offers.prefix($0)) } ?? context.offers
-            // When the card carries a `scrollTransition` (coverflow), drive each
-            // card's zIndex by its distance from the centered index so the
-            // focused card draws ON TOP of both neighbors. `.scrollTransition`'s
-            // closure can't set zIndex (it returns a VisualEffect, not a View),
-            // and with negative HStack spacing the later sibling (right
-            // neighbor) would otherwise overlap the focused card. Applying
-            // `.zIndex` on the ForEach's direct child reorders the stack's draw
-            // order. `currentIndex` tracks the centered card via viewAligned
-            // snapping. No-op for non-coverflow lists (zIndex stays 0).
-            let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
-            let centeredIndex = context.focusedIndex ?? 0
-            // Impression-firing lives on `renderButton` (offer-acting buttons
-            // fire `onOfferVisible` in their `.onAppear`) — the iteration is
-            // not the right scope, since whether an iteration is "an
-            // impression" depends on whether its rows are interactive.
-            ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
-                SDUIElementRenderer(
-                    element: config.itemTemplate,
-                    context: context,
-                    offer: offerItem,
-                    isCurrentPage: context.focusedIndex == index
-                )
-                .id(index)
-                // The first card reports its laid-out width so a
-                // `scrollAlignment: center` scroll view can derive the margin
-                // that centers it. Layout size, not visual: `scrollTransition`
-                // scale does not reach the GeometryReader. Only wired when the
-                // enclosing scroll view asked for it.
-                .background(
-                    index == 0 && measuresCarouselItemWidth
-                        ? GeometryReader { proxy in
-                            Color.clear.preference(key: SDUICarouselItemWidthKey.self, value: proxy.size.width)
-                        }
-                        : nil
-                )
-                .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
-                // Publish this card's distance from the centered card so
-                // descendant `scrollFade` layers (brand fill, checkmark) fade
-                // reliably by selection state — see SDUIScrollFadeModifier for
-                // why scroll-geometry approaches fail in the real app.
-                .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
-            }
+            renderOfferItems(config)
         case .pageIndicators:
             ForEach(0..<context.offers.count, id: \.self) { index in
                 SDUIElementRenderer(
@@ -807,6 +790,38 @@ struct SDUIElementRenderer: View {
                     isCurrentPage: context.focusedIndex == index
                 )
             }
+        }
+    }
+
+    private func renderOfferItems(_ config: SDUIForEach) -> some View {
+        let limitedOffers = config.limit.map { Array(context.offers.prefix($0)) } ?? context.offers
+        let usesCoverflowZIndex = Self.elementHasScrollTransition(config.itemTemplate)
+        let centeredIndex = context.focusedIndex ?? 0
+
+        return ForEach(Array(limitedOffers.enumerated()), id: \.element.id) { index, offerItem in
+            SDUIElementRenderer(
+                element: config.itemTemplate,
+                context: context,
+                offer: offerItem,
+                isCurrentPage: context.focusedIndex == index
+            )
+            .background {
+                GeometryReader { geometryProxy in
+                    Color.clear
+                        .preference(
+                            key: SDUIOfferCenterPreferenceKey.self,
+                            value: [index: geometryProxy.frame(in: .global).midX]
+                        )
+                        .preference(
+                            key: SDUICarouselItemWidthKey.self,
+                            value: index == 0 && measuresCarouselItemWidth ? geometryProxy.size.width : 0
+                        )
+                }
+                .allowsHitTesting(false)
+            }
+            .id(index)
+            .zIndex(usesCoverflowZIndex ? Double(-abs(index - centeredIndex)) : 0)
+            .environment(\.sduiScrollFadeDistance, Double(abs(index - centeredIndex)))
         }
     }
     
@@ -947,7 +962,7 @@ struct SDUIElementRenderer: View {
                 SDUIElementRenderer(element: ifFalse, context: context, offer: offer, isCurrentPage: isCurrentPage)
             }
         }
-        .transaction { $0.animation = nil }
+        .transition(.identity)
     }
     
     // MARK: - Group Renderer
@@ -995,7 +1010,138 @@ struct SDUIElementRenderer: View {
     }
 }
 
-// MARK: - Carousel Scroll Position
+// MARK: - iOS 17 Scroll View Renderer
+
+private struct SDUIOfferCenterPreferenceKey: PreferenceKey {
+    static let defaultValue: [Int: CGFloat] = [:]
+
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
+/// Keeps the iOS 17 scroll position separate from shared offer state. The
+/// two-way `scrollPosition(id:)` binding can otherwise write a stale target
+/// during initial layout and recursively invalidate the complete SDUI tree.
+@available(iOS 17.0, *)
+private struct SDUIIOS17ScrollViewRenderer: View {
+    let config: SDUIScrollView
+    @ObservedObject var context: SDUIContext
+    let offer: Offer?
+
+    @State private var userDrivenSelection: Int?
+
+    private var axis: Axis.Set {
+        config.axis?.axis ?? .vertical
+    }
+
+    private var scrollAxis: SDUIScrollAxis {
+        config.axis ?? .vertical
+    }
+
+    private var resolvedContentMargin: CGFloat? {
+        guard let margins = config.contentMargins else { return nil }
+        return axis == .horizontal ? margins.edgeInsets.leading : margins.edgeInsets.top
+    }
+
+    private var usesCenteredGeometry: Bool {
+        axis == .horizontal
+            && config.scrollAlignment == .center
+            && SDUIScrollLayout.offerItemWidth(for: config) != nil
+    }
+
+    init(config: SDUIScrollView, context: SDUIContext, offer: Offer?) {
+        self.config = config
+        self.context = context
+        self.offer = offer
+        _userDrivenSelection = State(initialValue: nil)
+    }
+
+    var body: some View {
+        ScrollViewReader { scrollProxy in
+            Group {
+                if usesCenteredGeometry {
+                    GeometryReader { geometryProxy in
+                        scrollView(
+                            contentMargin: SDUIScrollLayout.centeredContentMargin(
+                                for: config,
+                                viewportWidth: geometryProxy.size.width
+                            ),
+                            viewportWidth: geometryProxy.size.width
+                        )
+                        .onPreferenceChange(SDUIOfferCenterPreferenceKey.self) { offerCenters in
+                            updateVisibleOffer(
+                                from: offerCenters,
+                                viewportCenter: geometryProxy.frame(in: .global).midX
+                            )
+                        }
+                    }
+                    .modifier(SDUIStyleModifier(style: config.style))
+                } else {
+                    scrollView(contentMargin: resolvedContentMargin, viewportWidth: nil)
+                        .modifier(SDUIStyleModifier(style: config.style))
+                }
+            }
+            .onAppear {
+                scrollToContextSelection(using: scrollProxy, animated: false)
+            }
+            .onChange(of: context.focusedIndex) { _, newIndex in
+                if userDrivenSelection == newIndex {
+                    userDrivenSelection = nil
+                    return
+                }
+                scrollToContextSelection(using: scrollProxy, animated: true)
+            }
+        }
+    }
+
+    private func scrollView(contentMargin: CGFloat?, viewportWidth: CGFloat?) -> some View {
+        ScrollView(axis, showsIndicators: config.showsIndicators ?? true) {
+            scrollContent(centeredPadding: usesCenteredGeometry ? contentMargin : nil)
+                .environment(\.sduiCarouselViewportWidth, viewportWidth)
+        }
+        .applyScrollTargetBehavior(config.scrollTargetBehavior)
+        .applyContentMargin(usesCenteredGeometry ? nil : contentMargin, axis: axis)
+        .scrollClipDisabled(true)
+    }
+
+    @ViewBuilder
+    private func scrollContent(centeredPadding: CGFloat?) -> some View {
+        if let centeredPadding {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+                .padding(.horizontal, centeredPadding)
+        } else {
+            SDUIElementRenderer(element: config.content, context: context, offer: offer)
+        }
+    }
+
+    private func scrollToContextSelection(using scrollProxy: ScrollViewProxy, animated: Bool) {
+        guard let index = context.focusedIndex else { return }
+        let scroll = {
+            scrollProxy.scrollTo(index, anchor: config.scrollAlignment?.unitPoint)
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.35)) { scroll() }
+        } else {
+            scroll()
+        }
+    }
+
+    private func updateVisibleOffer(from offerCenters: [Int: CGFloat], viewportCenter: CGFloat) {
+        guard let visibleOffer = offerCenters.min(by: {
+            abs($0.value - viewportCenter) < abs($1.value - viewportCenter)
+        }),
+            visibleOffer.key != context.currentIndex
+        else { return }
+
+        userDrivenSelection = visibleOffer.key
+        context.currentIndex = visibleOffer.key
+        context.selectCenteredOffer(at: visibleOffer.key)
+        context.trackScroll(axis: scrollAxis, position: visibleOffer.key)
+    }
+}
+
+// MARK: - iOS 18 Carousel Scroll Position
 
 /// Binds the offer carousel's centred card to `context.currentIndex` — and only
 /// for the scroll view that actually owns the carousel.

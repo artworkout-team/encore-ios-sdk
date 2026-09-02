@@ -230,11 +230,23 @@ private struct SDUIScrollFadeDistanceKey: EnvironmentKey {
     static let defaultValue: Double = 0
 }
 
+/// Width of the carousel viewport. Nil outside the iOS 17 centered-carousel
+/// renderer so ordinary scroll-transition elements keep SwiftUI's native phase.
+@available(iOS 17.0, *)
+private struct SDUICarouselViewportWidthKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
 @available(iOS 17.0, *)
 extension EnvironmentValues {
     var sduiScrollFadeDistance: Double {
         get { self[SDUIScrollFadeDistanceKey.self] }
         set { self[SDUIScrollFadeDistanceKey.self] = newValue }
+    }
+
+    var sduiCarouselViewportWidth: CGFloat? {
+        get { self[SDUICarouselViewportWidthKey.self] }
+        set { self[SDUICarouselViewportWidthKey.self] = newValue }
     }
 }
 

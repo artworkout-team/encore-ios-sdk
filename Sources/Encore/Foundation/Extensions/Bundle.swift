@@ -1,7 +1,4 @@
 //
-//  Bundle.swift
-//  Encore
-//
 //  Host-app bundle accessors. Reads the primary CFBundleIcons entry so SDUI
 //  can render the installed app's icon without a network round-trip.
 //
@@ -12,70 +9,45 @@ import Foundation
 import UIKit
 
 extension Bundle {
-    /// The host app's primary icon, resolved once per process from
-    /// `Info.plist`'s `CFBundleIcons`.
-    ///
-    /// Icon Composer apps expose `CFBundleIconName`, but that name points to an
-    /// icon stack rather than a bitmap image. Asking `UIImage(named:)` to load
-    /// the stack raises an Objective-C exception (`Need an imageRef`) instead
-    /// of returning `nil`. Both Icon Composer and asset-catalog app icons also
-    /// publish rasterized filenames through `CFBundleIconFiles`, so prefer
-    /// those bundle resources and use the named asset only as a legacy fallback.
-    ///
-    /// Returns `nil` when the host has no bundled icon (e.g. running
-    /// under a test bundle with no app container).
-    static let hostAppIcon: UIImage? = resolveHostAppIcon()
+    /// The host app's primary icon, resolved once per process from `Info.plist`.
+    /// Prefers the rasterized names in `CFBundleIconFiles`, highest resolution
+    /// last. `nil` when the host has no bundled icon, as under a test bundle.
+    static let hostAppIcon: UIImage? = resolveHostAppIcon(
+        info: Bundle.main.infoDictionary ?? [:],
+        loadImage: { UIImage(named: $0) }
+    )
 
-    private static func resolveHostAppIcon() -> UIImage? {
-        let bundle = Bundle.main
-        let primaryIcons = primaryIconDictionaries(in: bundle)
-        let iconFiles = primaryIcons.flatMap { $0["CFBundleIconFiles"] as? [String] ?? [] }
+    /// Takes its inputs so tests can drive it: the real call reads `Bundle.main`,
+    /// which has no app container under a test bundle.
+    internal static func resolveHostAppIcon(
+        info: [String: Any],
+        loadImage: (String) -> UIImage?
+    ) -> UIImage? {
+        guard let primary = primaryIcon(in: info) else { return nil }
 
-        if let image = largestRasterIcon(namedBy: iconFiles, in: bundle) {
-            return image
-        }
-
-        // When file metadata exists, do not fall through to `UIImage(named:)`:
-        // the unresolved name may be an Icon Composer stack and UIKit traps
-        // before Swift can handle the failure.
-        guard iconFiles.isEmpty,
-              let name = primaryIcons.lazy.compactMap({ $0["CFBundleIconName"] as? String }).first,
-              let image = UIImage(named: name, in: bundle, compatibleWith: nil)
-        else { return nil }
-
-        return image
-    }
-
-    private static func primaryIconDictionaries(in bundle: Bundle) -> [[String: Any]] {
-        let info = bundle.infoDictionary ?? [:]
-        return ["CFBundleIcons~ipad", "CFBundleIcons"].compactMap { key in
-            guard let icons = info[key] as? [String: Any] else { return nil }
-            return icons["CFBundlePrimaryIcon"] as? [String: Any]
-        }
-    }
-
-    private static func largestRasterIcon(namedBy iconFiles: [String], in bundle: Bundle) -> UIImage? {
-        guard !iconFiles.isEmpty else { return nil }
-
-        let iconNames = Set(iconFiles.map {
-            URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent
-        })
-        let rasterIcons = (bundle.urls(forResourcesWithExtension: "png", subdirectory: nil) ?? [])
-            .filter { url in
-                let resourceName = url.deletingPathExtension().lastPathComponent
-                return iconNames.contains { iconName in
-                    resourceName == iconName
-                        || resourceName.hasPrefix("\(iconName)@")
-                        || resourceName.hasPrefix("\(iconName)~")
-                }
+        // An Icon Composer app names an icon stack in CFBundleIconName, and
+        // UIImage(named:) raises `Need an imageRef` on it rather than returning
+        // nil. Those apps publish rasters here too, so this key existing in any
+        // form, even malformed, is the signal to leave the name alone.
+        if let declared = primary["CFBundleIconFiles"] {
+            for name in ((declared as? [String]) ?? []).reversed() {
+                if let image = loadImage(name) { return image }
             }
-            .compactMap { UIImage(contentsOfFile: $0.path) }
-
-        return rasterIcons.max { lhs, rhs in
-            let lhsPixels = lhs.size.width * lhs.scale * lhs.size.height * lhs.scale
-            let rhsPixels = rhs.size.width * rhs.scale * rhs.size.height * rhs.scale
-            return lhsPixels < rhsPixels
+            return nil
         }
+
+        guard let name = primary["CFBundleIconName"] as? String else { return nil }
+        return loadImage(name)
+    }
+
+    /// The base key wins outright by existing, malformed included. Falling
+    /// through to the iPad override let an iPhone pick the iPad raster.
+    private static func primaryIcon(in info: [String: Any]) -> [String: Any]? {
+        for key in ["CFBundleIcons", "CFBundleIcons~ipad"] {
+            guard let icons = info[key] else { continue }
+            return (icons as? [String: Any])?["CFBundlePrimaryIcon"] as? [String: Any]
+        }
+        return nil
     }
 }
 #endif

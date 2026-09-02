@@ -14,7 +14,6 @@ import SwiftUI
 struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
-    @Environment(\.dismiss) var dismiss
 
     /// Immutable SDUI snapshot for this presentation. Resolving it once keeps
     /// the recursive config tree out of repeated SwiftUI body evaluation and
@@ -35,6 +34,8 @@ struct OfferSheetView: View {
     }
 
     private let initialStateOverride: String?
+    private let presentationHost: OfferSheetPresentationHost
+    private let onDismiss: () -> Void
 
     init(
         offerResponse: OfferResponse,
@@ -45,9 +46,13 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
+        presentationHost: OfferSheetPresentationHost,
+        onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
     ) {
         self.initialStateOverride = initialStateOverride
+        self.presentationHost = presentationHost
+        self.onDismiss = onDismiss
         config = sduiConfigManager?.layout(for: offerContext.useCase)
         variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
 
@@ -82,7 +87,11 @@ struct OfferSheetView: View {
                     isClaimDisabled: !sduiContext.isClaimEnabled,
                     onClose: {
                         viewModel.completionHandler.stageDismissal(.userTappedClose)
-                        dismiss()
+                        Self.requestDismissal(
+                            presentationHost: presentationHost,
+                            completionHandler: viewModel.completionHandler,
+                            onDismiss: onDismiss
+                        )
                     },
                     onSafariEvent: viewModel.handleSafariTrackingEvent,
                     onSafariDismiss: viewModel.handleSafariDismiss
@@ -169,7 +178,7 @@ struct OfferSheetView: View {
         // false` forces the bleed and lets the variant manage its own insets.
         .modifier(SDUIRootSafeAreaModifier(
             respectsSafeArea: loadedConfig.respectsSafeArea ?? true,
-            presentationStyle: loadedConfig.presentationStyle ?? .default
+            presentationStyle: presentationHost.contentPresentationStyle
         ))
         // Expose the active Appearance to ViewModifiers (e.g. SDUIBackgroundModifier)
         // so `{"appearance": "accent"}` in variant JSON resolves to the per-app brand color.
@@ -205,12 +214,35 @@ struct OfferSheetView: View {
 
     private func setupContext() {
         sduiContext.isClaimEnabled = Encore.shared.isClaimEnabled
-        viewModel.bind(sduiContext: sduiContext, dismiss: dismiss)
+        viewModel.bind(sduiContext: sduiContext) { [weak viewModel] in
+            guard let completionHandler = viewModel?.completionHandler else { return }
+            Self.requestDismissal(
+                presentationHost: presentationHost,
+                completionHandler: completionHandler,
+                onDismiss: onDismiss
+            )
+        }
         sduiContext.onAction = { [weak viewModel] action, offer in
             viewModel?.handleSDUIAction(action, offer: offer)
         }
         sduiContext.onOfferVisible = { [weak viewModel] index in
             viewModel?.trackOfferImpression(at: index)
+        }
+    }
+
+    private static func requestDismissal(
+        presentationHost: OfferSheetPresentationHost,
+        completionHandler: SheetDismissHandler,
+        onDismiss: () -> Void
+    ) {
+        switch presentationHost {
+        case .managedWindow(.sheet):
+            onDismiss()
+        case .managedWindow(.fullScreenCover):
+            completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
+        case .viewController:
+            completionHandler.handleImmediate(dismissal: completionHandler.resolvedDismissal)
+            onDismiss()
         }
     }
 

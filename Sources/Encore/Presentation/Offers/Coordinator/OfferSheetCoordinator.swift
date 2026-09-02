@@ -544,6 +544,17 @@ internal final class OfferSheetCoordinator {
         }
         Logger.info(.presentation, "Presenting offer sheet with \(response.offerCount) offers")
 
+        let presentationStyle = sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
+        let presentationHost: OfferSheetPresentationHost
+        let controllerBox: ControllerBox?
+        switch presentationTarget {
+        case .managedWindow:
+            presentationHost = .managedWindow(presentationStyle)
+            controllerBox = nil
+        case .hostController:
+            presentationHost = .viewController
+            controllerBox = ControllerBox()
+        }
         let containerView = OfferSheetContainer(
             offerResponse: response,
             userId: userId,
@@ -551,9 +562,12 @@ internal final class OfferSheetCoordinator {
             placementId: placementId,
             placementLabel: placementLabel,
             offerContext: offerContext,
-            presentationStyle: sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet,
             initialStateOverride: initialStateOverride,
             initiallyPurchased: initiallyPurchased,
+            presentationHost: presentationHost,
+            onDismissRequest: {
+                (controllerBox?.value as? OfferSheetViewController)?.requestDismissal()
+            },
             onCompletion: { [weak self] result in
                 self?.complete(result)
             }
@@ -563,6 +577,7 @@ internal final class OfferSheetCoordinator {
         case .managedWindow:
             let window = PresentationWindow.present(
                 containerView,
+                presentationStyle: presentationStyle,
                 overrideUserInterfaceStyle: offerContext.appearanceMode.userInterfaceStyle
             ) { [weak self] in
                 self?.complete(.success(.presented(dismissal: .dismissed)))
@@ -577,7 +592,8 @@ internal final class OfferSheetCoordinator {
         case .hostController:
             let controller = OfferSheetViewController(rootView: containerView)
             controller.overrideUserInterfaceStyle = offerContext.appearanceMode.userInterfaceStyle
-            let box = ControllerBox(controller)
+            let box = controllerBox ?? ControllerBox()
+            box.value = controller
             Self.current = ActivePresentation(coordinator: self, phase: .presentingController(controller: box))
             let continuation = controllerContinuation
             controllerContinuation = nil
@@ -622,17 +638,29 @@ internal final class OfferSheetCoordinator {
         // A flow that never reached a controller still has a caller awaiting one.
         let pendingController = controllerContinuation
         self.controllerContinuation = nil
+        let collapsed = Self.collapse(result)
+
+        let finish = {
+            pendingController?.resume(returning: nil)
+            resultHandler(collapsed)
+        }
 
         // Phase-based cleanup (only if this coordinator owns current)
         var hostController: UIViewController?
         if let active = Self.current, active.coordinator === self {
             if case .loading(let task) = active.phase { task.cancel() }
-            if case .presenting = active.phase { PresentationWindow.cleanup() }
+            if case .presenting = active.phase {
+                PresentationWindow.cleanup(animated: true) { [self] in
+                    if Self.current?.coordinator === self {
+                        Self.current = ActivePresentation(coordinator: self, phase: .finished)
+                    }
+                    finish()
+                }
+                return
+            }
             if case .presentingController(let box) = active.phase { hostController = box.value }
             Self.current = ActivePresentation(coordinator: self, phase: .finished)
         }
-
-        let collapsed = Self.collapse(result)
 
         if let pendingController {
             // Resuming schedules the caller, it does not preempt, so delivering
@@ -646,7 +674,7 @@ internal final class OfferSheetCoordinator {
             return
         }
 
-        resultHandler(collapsed)
+        finish()
 
         // After the host has had its turn: it may have removed or replaced the
         // controller already, and asking a controller that is gone to dismiss

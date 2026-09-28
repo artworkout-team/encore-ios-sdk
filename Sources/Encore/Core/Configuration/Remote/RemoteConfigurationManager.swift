@@ -56,7 +56,19 @@ class RemoteConfigurationManager {
 
     /// In-flight lazy fetches keyed by use case, so concurrent presentations
     /// join one request instead of racing to issue several.
-    private let lazyTasks = Atomic<[UseCase: Task<RemoteConfiguration?, Never>]>([:])
+    /// The demo-variant request is part of the key, so a changed request never
+    /// joins a fetch issued for the previous one.
+    private let lazyTasks = Atomic<[LazyFetchKey: Task<RemoteConfiguration?, Never>]>([:])
+
+    private struct LazyFetchKey: Hashable {
+        let useCase: UseCase
+        let demoVariant: String?
+    }
+
+    /// SDUI variant names requested per use case through `/config`'s
+    /// `demoVariant`. Host configuration rather than user state, so it
+    /// survives identity changes and `clearCache()`.
+    private let demoVariants = Atomic<[UseCase: String]>([:])
 
     /// Use cases already warned about, so the `[INTEGRATION]` hint fires once
     /// per use case rather than once per presentation.
@@ -91,6 +103,8 @@ class RemoteConfigurationManager {
     private struct StampedConfiguration {
         let configuration: RemoteConfiguration
         let identity: ConfigIdentity?
+        /// The `demoVariant` requested when this entry was resolved.
+        var demoVariant: String? = nil
     }
 
     /// Thread-safe cached configuration per use case.
@@ -110,6 +124,9 @@ class RemoteConfigurationManager {
     private func currentEntry(for useCase: UseCase) -> RemoteConfiguration? {
         guard let entry = _configs.value[useCase] else { return nil }
         if let stamp = entry.identity, stamp != currentIdentity.value { return nil }
+        // An entry resolved under another demo-variant request is invisible,
+        // so a changed request refetches instead of serving the old variant.
+        if entry.demoVariant != demoVariants.value[useCase] { return nil }
         return entry.configuration
     }
 
@@ -152,6 +169,27 @@ class RemoteConfigurationManager {
     }
 
     // MARK: - Public Methods
+
+    /// Requests `variantName` for `useCase` on its next presentation through
+    /// `/config`'s `demoVariant`. nil, empty or whitespace clears the request.
+    ///
+    /// Churn intervention is resolved by the identify-time fetch, which also
+    /// carries entitlements and experiments, so it is refused.
+    func setDemoVariant(_ variantName: String?, for useCase: UseCase) {
+        guard useCase != .reduceChurn else {
+            integrationWarning("[INTEGRATION] setDemoVariant does not support '\(useCase.rawValue)'; ignored.")
+            return
+        }
+        let trimmed = variantName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requested = trimmed?.isEmpty == false ? trimmed : nil
+        let previous = demoVariants.mutate { (variants: inout [UseCase: String]) -> String? in
+            let previous = variants[useCase]
+            variants[useCase] = requested
+            return previous
+        }
+        guard previous != requested else { return }
+        Logger.info("🧪 [RemoteConfig] demoVariant for \(useCase.rawValue): \(requested ?? "none")")
+    }
 
     /// Fetches remote configuration. Fire-and-forget — cancels any in-flight request (latest identity wins).
     /// `language` overrides device locale on the backend when non-nil; pass
@@ -250,7 +288,13 @@ class RemoteConfigurationManager {
         let requestedFor = ConfigIdentity(userId: userId, language: language)
         let callerIsCurrent = currentIdentity.value == requestedFor
         if callerIsCurrent, let stored = storedConfiguration(for: useCase, userId: userId, language: language) {
-            _configs.mutate { $0[useCase] = StampedConfiguration(configuration: stored, identity: requestedFor) }
+            // Demo fetches never persist, so under a demo-variant request this
+            // is the assigned variant. Stamping it with the request keeps it
+            // visible until the demo fetch lands or the request changes.
+            let demoVariant = demoVariants.value[useCase]
+            _configs.mutate {
+                $0[useCase] = StampedConfiguration(configuration: stored, identity: requestedFor, demoVariant: demoVariant)
+            }
             Logger.info("📦 [RemoteConfig] Rung 2 for \(useCase.rawValue): rendering the stored template (variantId=\(stored.ui.variantId ?? "nil"))")
             return stored
         }
@@ -268,12 +312,17 @@ class RemoteConfigurationManager {
         sdkVersion: String,
         language: String?
     ) async -> RemoteConfiguration? {
-        warnPrefetchWasMissed(useCase)
+        let demoVariant = demoVariants.value[useCase]
+        // A demo-variant request skips the prefetched variant on purpose.
+        if demoVariant == nil {
+            warnPrefetchWasMissed(useCase)
+        }
 
         let requestedFor = ConfigIdentity(userId: userId, language: language)
+        let key = LazyFetchKey(useCase: useCase, demoVariant: demoVariant)
         let repository = self.repository
         let task: Task<RemoteConfiguration?, Never> = lazyTasks.mutate { tasks in
-            if let existing = tasks[useCase] { return existing }
+            if let existing = tasks[key] { return existing }
             // The in-flight task caches its result before clearing itself, so a
             // straggler that raced the clear finds the config here and joins a
             // resolved value instead of issuing a duplicate request.
@@ -281,7 +330,7 @@ class RemoteConfigurationManager {
                 return Task { cached }
             }
             let created = Task<RemoteConfiguration?, Never> { [weak self] in
-                defer { self?.lazyTasks.mutate { $0[useCase] = nil } }
+                defer { self?.lazyTasks.mutate { $0[key] = nil } }
                 do {
                     // Requested explicitly, so this resolves the use case
                     // properly — experiments included — rather than taking the
@@ -290,7 +339,8 @@ class RemoteConfigurationManager {
                         userId: userId,
                         sdkVersion: sdkVersion,
                         language: language,
-                        useCase: useCase
+                        useCase: useCase,
+                        demoVariant: demoVariant
                     )
                     guard !Task.isCancelled else {
                         Logger.info("🔄 [RemoteConfig] Discarding stale \(useCase.rawValue) result (newer identity)")
@@ -304,19 +354,27 @@ class RemoteConfigurationManager {
                         Logger.info("🔄 [RemoteConfig] Discarding \(useCase.rawValue) config for a superseded identity")
                         return nil
                     }
-                    // The repository already persisted what this response
-                    // resolved, at the fetch itself.
-                    self?._configs.mutate {
-                        $0[useCase] = StampedConfiguration(configuration: result.configuration, identity: requestedFor)
+                    guard self?.demoVariants.value[useCase] == demoVariant else {
+                        Logger.info("🔄 [RemoteConfig] Discarding \(useCase.rawValue) config for a superseded demoVariant")
+                        return nil
                     }
-                    Logger.info("✅ [RemoteConfig] Fetched \(useCase.rawValue): variantId=\(result.configuration.ui.variantId ?? "none")")
+                    // The repository already persisted what a non-demo
+                    // response resolved, at the fetch itself.
+                    self?._configs.mutate {
+                        $0[useCase] = StampedConfiguration(
+                            configuration: result.configuration,
+                            identity: requestedFor,
+                            demoVariant: demoVariant
+                        )
+                    }
+                    Logger.info("✅ [RemoteConfig] Fetched \(useCase.rawValue): variantId=\(result.configuration.ui.variantId ?? "none"), variantName=\(result.configuration.ui.variantName ?? "none"), demoVariant=\(demoVariant ?? "none")")
                     return result.configuration
                 } catch {
                     Logger.warn("⚠️ [RemoteConfig] \(useCase.rawValue) fetch failed: \(error.localizedDescription)")
                     return nil
                 }
             }
-            tasks[useCase] = created
+            tasks[key] = created
             return created
         }
 

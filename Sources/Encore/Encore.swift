@@ -286,7 +286,22 @@ public final class Encore: EncoreProtocol {
             refetchOffers()
         }
     }
-    
+
+    /// Requests a named SDUI variant for `useCase`, for example
+    /// `"allGiftsAtOnce"` for `.rewardUsers`, on its next presentation.
+    ///
+    /// Sent as `/config`'s `demoVariant`. The backend honours it for a test
+    /// key (`pk_test_*`); a live key, or an unknown name, resolves the assigned
+    /// variant as usual. Analytics carry the variant actually served. Pass nil
+    /// or an empty string to clear the request. `.reduceChurn` is unsupported.
+    public func setDemoVariant(_ variantName: String?, for useCase: UseCase) {
+        guard let remoteConfigManager else {
+            Logger.error(.integration(.notConfigured), context: .configuration)
+            return
+        }
+        remoteConfigManager.setDemoVariant(variantName, for: useCase)
+    }
+
     /// Clears user data and generates a new anonymous ID. Call on logout.
     ///
     /// The registered ``EncorePurchaseController`` and purchase-complete

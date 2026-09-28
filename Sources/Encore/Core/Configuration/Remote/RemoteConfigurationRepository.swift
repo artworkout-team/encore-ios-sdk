@@ -105,13 +105,18 @@ internal struct RemoteConfigurationRepository: Sendable {
     ///     Every *other* enabled use case comes back in the same response's
     ///     prefetch block as its default variant, so asking for one explicitly
     ///     is only needed when its experiment assignment must be resolved.
+    ///   - demoVariant: Optional SDUI variant name sent as `demoVariant`. The
+    ///     backend honours it only for a test key and otherwise resolves the
+    ///     assigned variant. A demo response is a preview rather than the user's
+    ///     assignment, so nothing from it is persisted.
     /// - Returns: The resolved configuration plus the default configuration for
     ///   every other use case the app is enabled for.
     func fetchRemote(
         userId: String,
         sdkVersion: String,
         language: String?,
-        useCase: UseCase = .reduceChurn
+        useCase: UseCase = .reduceChurn,
+        demoVariant: String? = nil
     ) async throws -> RemoteConfigurationBundle {
         var query: [String: String?] = ["userId": userId, "sdkVersion": sdkVersion]
         if let language, !language.isEmpty {
@@ -120,13 +125,20 @@ internal struct RemoteConfigurationRepository: Sendable {
         if useCase.needsConfigQueryParameter {
             query["useCase"] = useCase.rawValue
         }
+        if let demoVariant {
+            query["demoVariant"] = demoVariant
+        }
         let dto: DTO.RemoteConfig.ConfigResponseEnvelope = try await client.request(
             path: "config",
             method: "GET",
             query: query
         )
         let bundle = RemoteConfigurationBundle(from: dto, requestedFor: useCase)
-        persistResolvedTemplates(bundle, dto: dto, userId: userId, language: language)
+        // Persisting a demo response would let rung 2 keep serving the
+        // requested variant after the request is cleared.
+        if demoVariant == nil {
+            persistResolvedTemplates(bundle, dto: dto, userId: userId, language: language)
+        }
         return bundle
     }
 

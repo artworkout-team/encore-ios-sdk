@@ -44,6 +44,9 @@ struct OfferContext {
     /// hold regardless of what the backend sent.
     let copyOverrides: [String: String]
 
+    /// Publisher brand colours for this presentation (`placement(...).appearance(_:)`).
+    let appearance: AppearanceConfig?
+
     // MARK: - Initialization
 
     /// Creates an OfferContext with the given configuration and IAP data
@@ -52,13 +55,15 @@ struct OfferContext {
         entitlements: EntitlementConfiguration? = nil,
         iap: IAPContext = .empty,
         useCase: UseCase = .reduceChurn,
-        copyOverrides: [String: String] = [:]
+        copyOverrides: [String: String] = [:],
+        appearance: AppearanceConfig? = nil
     ) {
         self.uiValues = uiValues
         self.entitlements = entitlements
         self.iap = iap
         self.useCase = useCase
         self.copyOverrides = copyOverrides
+        self.appearance = appearance
     }
 
     /// Creates an empty context (for fallback scenarios)
@@ -198,13 +203,16 @@ struct OfferContext {
     
     /// Subtitle text from UI values
     var subtitleText: String? { uiValues?.subtitle }
+
+    /// The headline this presentation's use case actually renders, resolved
+    /// through `allVariables` so publisher overrides win. `titleText` is the
+    /// churn-specific raw value and does not answer for a reward placement.
+    var headlineText: String? { allVariables[useCase.headlineVariable] }
+
+    /// The subheadline for this use case. Absent is a real state for rewards:
+    /// the template branches on it, so no default is substituted here.
+    var subheadlineText: String? { allVariables[useCase.subheadlineVariable] }
     
-    /// Reward headline resolved with publisher overrides taking precedence.
-    var rewardHeadlineText: String? { allVariables["rewardHeadline"] }
-
-    /// Reward subheadline resolved with publisher overrides taking precedence.
-    var rewardSubheadlineText: String? { allVariables["rewardSubheadline"] }
-
     /// Accent color hex from UI values
     var accentColor: String? { uiValues?.accentColor }
     

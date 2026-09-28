@@ -128,8 +128,7 @@ internal final class AnalyticsClient {
         userProperties["user_id"] = userId
         userProperties["app_bundle_id"] = appBundleId
 
-        // Sink identify always runs — refreshes PostHog user properties even
-        // when the analytics emit is suppressed below.
+        // Sink identify always runs, even when the analytics emit is suppressed below.
         for sink in sinks {
             sink.identify(userId: userId, userProperties: userProperties)
         }

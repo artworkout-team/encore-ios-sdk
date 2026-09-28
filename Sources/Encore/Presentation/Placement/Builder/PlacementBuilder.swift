@@ -2,7 +2,10 @@
 // Lives in Presentation/ because it coordinates UI presentation.
 // Async-first: delegates directly to OfferSheetCoordinator.present(placementId:).
 
+import Foundation
+#if canImport(UIKit)
 import UIKit
+#endif
 
 // MARK: - Public Protocol
 
@@ -18,25 +21,26 @@ public protocol PlacementBuilderProtocol {
     /// Fire-and-forget present, then run `resume` on the main actor once the flow completes, with the PresentationResult. Delivers **every** outcome, including `.notPresented`.
     func show(resume: @escaping @Sendable (PresentationResult) -> Void)
 
-    /// Builds a host-owned offer controller without presenting it.
+    #if canImport(UIKit)
+    /// Builds an offer controller for you to place, instead of presenting it.
     ///
     /// Push or present the returned controller from your own navigation stack.
-    /// Returns `nil` when the placement cannot be presented. Terminal outcomes
-    /// are still published through ``Encore/outcomes``.
+    /// `nil` means the placement could not be presented. Encore's own builder
+    /// also publishes that reason to ``Encore/outcomes``; a third-party
+    /// conformer on the default implementation reports it through `resume`
+    /// only, because no presentation was ever registered to report on.
     func makeViewController() async -> UIViewController?
 
-    /// Builds a host-owned offer controller and delivers its terminal result.
+    /// Builds an offer controller and delivers its terminal result.
     ///
-    /// `resume` runs on the main actor before the controller's automatic
-    /// dismissal, allowing the host to replace or remove it from its own
-    /// hierarchy first. If the host leaves it in place, the controller falls
-    /// back to a normal navigation pop or modal dismissal.
-    ///
-    /// If the placement cannot be built, this returns `nil` and still invokes
-    /// `resume` with the corresponding `.notPresented` result.
-    func makeViewController(
-        resume: @escaping @Sendable (PresentationResult) -> Void
-    ) async -> UIViewController?
+    /// `resume` never runs before this call has returned, so you always hold the
+    /// controller, or the `nil`, before your callback fires. It then runs before
+    /// the controller removes itself, so you can replace or remove it first.
+    /// Leave it in place and it pops, dismisses, or detaches the way it was
+    /// added. When the
+    /// placement cannot be built this returns `nil` and still calls `resume`.
+    func makeViewController(resume: @escaping @Sendable (PresentationResult) -> Void) async -> UIViewController?
+    #endif
 
     /// Warms this placement's offers so `show()` opens the sheet without a
     /// network round trip. A publisher-chosen id is stamped on the offers
@@ -72,9 +76,16 @@ public protocol PlacementBuilderProtocol {
     /// Overrides the sheet's subheadline for this presentation.
     /// Same priority and empty-string rules as ``headline(_:)``.
     func subheadline(_ text: String) -> Self
+
+    /// Sets brand colours for this presentation, as the web SDK's `appearance` option.
+    /// Last call wins; unset fields keep the sheet's defaults.
+    func appearance(_ config: AppearanceConfig) -> Self
 }
 
 public extension PlacementBuilderProtocol {
+    /// Conformers that predate this requirement ignore appearance.
+    func appearance(_ config: AppearanceConfig) -> Self { self }
+
     func show(resume: @escaping @Sendable (PresentationResult) -> Void) {
         Task { @MainActor in
             let result = await show()
@@ -87,9 +98,16 @@ public extension PlacementBuilderProtocol {
         Encore.shared.prefetchOffers(placementLabel: PlacementLabel.sanitized(id))
     }
 
-    func makeViewController(
-        resume: @escaping @Sendable (PresentationResult) -> Void
-    ) async -> UIViewController? {
+    #if canImport(UIKit)
+    /// A conformer that predates this requirement cannot build a controller.
+    /// Reported as `.error(.domain)`, which serialises as `domain_error`.
+    /// `.notConfigured` would call a configured placement unconfigured, and it
+    /// is also what `.error(.integration(.notConfigured))` puts on the wire. A
+    /// new `NotPresentedReason` case would be source-breaking.
+    func makeViewController(resume: @escaping @Sendable (PresentationResult) -> Void) async -> UIViewController? {
+        // Deferred for the same reason the coordinator defers: the contract
+        // above says `resume` never runs before this call has returned, and
+        // that has to hold on every path, including this one.
         Task { @MainActor in
             resume(.notPresented(.error(.domain(
                 "This PlacementBuilderProtocol conformer does not implement makeViewController"
@@ -101,6 +119,7 @@ public extension PlacementBuilderProtocol {
     func makeViewController() async -> UIViewController? {
         await makeViewController(resume: { _ in })
     }
+    #endif
 }
 
 // MARK: - Internal Implementation
@@ -117,6 +136,8 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
     private var selectedUseCase: UseCase = .reduceChurn
     private var headlineOverride: String?
     private var subheadlineOverride: String?
+    /// Readable for tests; set only through `appearance(_:)`.
+    internal private(set) var appearanceOverride: AppearanceConfig?
 
     private var onLoadingStateChangeCallback: (@Sendable (Bool) -> Void)?
 
@@ -137,29 +158,31 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
             placementId: id,
             placementLabel: label,
             useCase: selectedUseCase,
-            copyOverrides: copyOverrides
+            copyOverrides: copyOverrides,
+            appearance: appearanceOverride
         )
         Logger.info(.presentation, "show(\(id)) → \(result) | advertiser=\(String(describing: result.advertiser)) publisher=\(String(describing: result.publisher))")
         return result
     }
 
-    func makeViewController(
-        resume: @escaping @Sendable (PresentationResult) -> Void
-    ) async -> UIViewController? {
+    #if canImport(UIKit)
+    func makeViewController(resume: @escaping @Sendable (PresentationResult) -> Void) async -> UIViewController? {
         Logger.debug(.presentation, "makeViewController(\(id)) — preparing")
         onLoadingStateChangeCallback?(true)
         defer { onLoadingStateChangeCallback?(false) }
 
-        let viewController = await OfferSheetCoordinator.makeViewController(
+        let controller = await OfferSheetCoordinator.makeViewController(
             placementId: id,
             placementLabel: label,
             useCase: selectedUseCase,
             copyOverrides: copyOverrides,
+            appearance: appearanceOverride,
             resume: resume
         )
-        Logger.info(.presentation, "makeViewController(\(id)) → \(viewController == nil ? "not built" : "ready")")
-        return viewController
+        Logger.info(.presentation, "makeViewController(\(id)) → \(controller == nil ? "not built" : "ready")")
+        return controller
     }
+    #endif
 
     // MARK: - Builder Methods
 
@@ -178,6 +201,12 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
     func subheadline(_ text: String) -> PlacementBuilder {
         var copy = self
         copy.subheadlineOverride = text
+        return copy
+    }
+
+    func appearance(_ config: AppearanceConfig) -> PlacementBuilder {
+        var copy = self
+        copy.appearanceOverride = config
         return copy
     }
 

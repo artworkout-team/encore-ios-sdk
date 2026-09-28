@@ -36,6 +36,9 @@ struct SDUIText: Decodable {
     var lineLimit: Int?
     var multilineAlignment: SDUIAlignment?
     var strikethrough: Bool?
+    /// Underlines the whole run. What makes a terms link read as a link, since
+    /// the vocabulary has no link element of its own.
+    var underline: Bool?
     /// Color for `*marked*` runs inside the resolved text.
     ///
     /// `segments` can only style text the SERVER splits up; a value substituted
@@ -100,9 +103,24 @@ enum SDUITextBinding: String, Decodable {
     case offerDescription
     case offerPerk
     case offerCtaText
+    /// The creative's short guidance phrases, e.g. "sign up, create registry".
+    /// Empty when the creative carries none, so gate the line on
+    /// `hasOfferAttribute: quickInstructions`.
+    case offerQuickInstructions
+    /// The offer's price pair, free text on the campaign. Filled on 7 and 2 of
+    /// 69 live campaigns, so a variant using either must tolerate an empty string.
+    case offerNewPrice
+    case offerOldPrice
     case titleText
     case accentTitleText
     case subtitleText
+    /// The category being iterated by a `categories` forEach. Empty outside one.
+    case categoryName
+    /// The step being iterated by an `instructions` forEach. Empty outside one.
+    case instructionTitle
+    case instructionSubtitle
+    /// Empty on a step that carries no button copy, which most do not.
+    case instructionCtaText
 }
 
 // MARK: - Image Elements
@@ -143,6 +161,9 @@ struct SDUIAsyncVideo: Decodable {
 enum SDUICreativeBinding: String, Decodable {
     case offerPrimaryCreative
     case offerLogoImage
+    /// The campaign hero, falling back to the creative image. Does NOT fire the
+    /// impression: `offerPrimaryCreative` stays the one probe.
+    case offerHeroImage
 }
 
 enum SDUIContentMode: String, Decodable {
@@ -163,6 +184,39 @@ struct SDUIButton: Decodable {
     let action: SDUIAction
     var style: SDUIStyle?
     var disabled: Bool?
+    /// Seconds the button must be HELD before `action` fires. Absent means a
+    /// plain tap, which is every button shipped today.
+    ///
+    /// It rides `button` rather than being a new element for the same reason
+    /// `columns` rides `forEach`: an SDK that predates this ignores the unknown
+    /// field and the button still works, as a tap. A new element case would
+    /// fail the whole config.
+    var holdDuration: Double?
+    /// State entered while the hold is IN PROGRESS, and left again if the hold
+    /// is abandoned.
+    ///
+    /// This is what gives a hold its feedback, and it is why the gesture ships
+    /// beside the animation work rather than after it: with `stateStyles` the
+    /// lid lifts as the user presses and falls back when they let go, authored
+    /// entirely in the template.
+    ///
+    /// The button must stay RENDERED in that state. Unmounting it, say from a
+    /// `conditional` on `stateEquals`, cancels the gesture mid-press, so the
+    /// hold never completes and each attempt only flickers the state.
+    var onHoldState: String?
+
+    /// Whether this button is held rather than tapped.
+    var isHoldButton: Bool { resolvedHoldDuration != nil }
+
+    /// The hold length, clamped.
+    ///
+    /// Below 50ms is not a hold, it is a tap with extra steps, and authoring it
+    /// as one would make the gesture feel broken rather than fast. The ceiling
+    /// stops a typo parking a finger on screen for a minute.
+    var resolvedHoldDuration: Double? {
+        guard let holdDuration, holdDuration > 0 else { return nil }
+        return min(max(holdDuration, 0.05), 10)
+    }
 }
 
 struct SDUIStack: Decodable {
@@ -368,12 +422,35 @@ struct SDUIScrollView: Decodable {
     var axis: SDUIScrollAxis?
     var showsIndicators: Bool?
     var style: SDUIStyle?
-    /// Content margins for scroll content
+    /// Content margins for scroll content. With `scrollAlignment: center` the
+    /// horizontal value is only the fallback used until the viewport and item
+    /// widths are measured.
     var contentMargins: SDUIPadding?
     /// Whether to use view-aligned scroll target behavior (for paging)
     var scrollTargetBehavior: SDUIScrollTargetBehavior?
-    /// Alignment of the selected target within the scroll viewport.
+    /// Where a snapped card sits in the viewport. Absent == `leading` (today's
+    /// behavior). `center` derives the horizontal content margin from the
+    /// measured viewport width and the first offer card's width, so a
+    /// fixed-width card is centered on every screen width. Horizontal +
+    /// `scrollTargetBehavior` + an offers `forEach` only; ignored otherwise.
     var scrollAlignment: SDUIScrollAlignment?
+
+    private enum CodingKeys: String, CodingKey {
+        case content, axis, showsIndicators, style, contentMargins, scrollTargetBehavior, scrollAlignment
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        content = try container.decode(SDUIElement.self, forKey: .content)
+        axis = try container.decodeIfPresent(SDUIScrollAxis.self, forKey: .axis)
+        showsIndicators = try container.decodeIfPresent(Bool.self, forKey: .showsIndicators)
+        style = try container.decodeIfPresent(SDUIStyle.self, forKey: .style)
+        contentMargins = try container.decodeIfPresent(SDUIPadding.self, forKey: .contentMargins)
+        scrollTargetBehavior = try container.decodeIfPresent(SDUIScrollTargetBehavior.self, forKey: .scrollTargetBehavior)
+        // Tolerant: a value this SDK does not know (a future alignment, or a
+        // non-string) reads as "unset" rather than failing the whole template.
+        scrollAlignment = (try? container.decodeIfPresent(SDUIScrollAlignment.self, forKey: .scrollAlignment)) ?? nil
+    }
 }
 
 enum SDUIScrollTargetBehavior: String, Decodable {
@@ -381,18 +458,10 @@ enum SDUIScrollTargetBehavior: String, Decodable {
     case paging
 }
 
+/// Where a snapped scroll item sits in the viewport. See `SDUIScrollView.scrollAlignment`.
 enum SDUIScrollAlignment: String, Decodable {
     case leading
     case center
-    case trailing
-
-    var unitPoint: UnitPoint {
-        switch self {
-        case .leading: return .leading
-        case .center: return .center
-        case .trailing: return .trailing
-        }
-    }
 }
 
 // MARK: - Data Elements
@@ -401,12 +470,175 @@ struct SDUIForEach: Decodable {
     let dataSource: SDUIDataSource
     let itemTemplate: SDUIElement
     var limit: Int?
+    /// How many rows to SKIP before the first one rendered. Absent means none.
+    ///
+    /// Applied before `limit`, so the two together are a window: the box is
+    /// `limit: 3`, and "the gifts that did not fit" is `offset: 3`. The
+    /// workaround it retires was a `not` over an `or` of `offerIndexEquals`,
+    /// which hardcoded the box size in two places with nothing to catch a
+    /// change.
+    ///
+    /// Offers only, like `limit`. Neither applies to `pageIndicators`, which
+    /// counts pages rather than listing them.
+    var offset: Int?
+    /// Lay the rows out in this many columns instead of one flat run.
+    ///
+    /// Absent means the run stays flat, which is what every shipped variant
+    /// gets. A grid is a LAYOUT over the same data, so it rides `forEach`
+    /// rather than being its own element: `limit`, `offset`, `style` and the
+    /// impression probe all keep working unchanged, and an SDK that predates
+    /// this renders the same offers in one column.
+    ///
+    /// A static grid is not this. Nested `hStack`s already express a FIXED
+    /// count; what could not be expressed is two columns over a count only the
+    /// server knows.
+    var columns: Int?
+    /// Gap between grid cells, on both axes. Absent means none, matching a
+    /// stack whose `spacing` is absent.
+    var gridSpacing: CGFloat?
     var style: SDUIStyle?
+    /// Whether these rows report impressions. Absent means `row`.
+    ///
+    /// `off` means NO impression from this loop, including from a creative
+    /// inside it. Anything else would make the value's own name a lie.
+    ///
+    /// Decode-only today: no served variant sets it. It exists so a second
+    /// offer loop that is a picker rather than a card can be silenced without
+    /// another release across both natives and the five wrappers.
+    var impressionProbe: SDUIImpressionProbe?
+
+    private enum CodingKeys: String, CodingKey {
+        case dataSource, itemTemplate, limit, offset, columns, gridSpacing, style, impressionProbe, filter
+    }
+
+    /// Hand-written for one reason: an unrecognised `impressionProbe` decodes as
+    /// absent instead of failing the whole config.
+    ///
+    /// Strict decode would defeat the field's own purpose. The day a third value
+    /// is added, every build shipped before it would drop the entire variant and
+    /// fall back to a sheet that probes rows anyway, so the operator would lose
+    /// the design AND still get the impressions they asked to suppress. Absent
+    /// is the legacy behaviour, so landing there is what an older client does.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dataSource = try container.decode(SDUIDataSource.self, forKey: .dataSource)
+        itemTemplate = try container.decode(SDUIElement.self, forKey: .itemTemplate)
+        limit = try container.decodeIfPresent(Int.self, forKey: .limit)
+        offset = try container.decodeIfPresent(Int.self, forKey: .offset)
+        columns = try container.decodeIfPresent(Int.self, forKey: .columns)
+        gridSpacing = try container.decodeIfPresent(CGFloat.self, forKey: .gridSpacing)
+        style = try container.decodeIfPresent(SDUIStyle.self, forKey: .style)
+        impressionProbe = try? container.decodeIfPresent(SDUIImpressionProbe.self, forKey: .impressionProbe)
+        filter = try container.decodeIfPresent(SDUICondition.self, forKey: .filter)
+    }
+
+    /// The DISPLAY index the first rendered row sits at.
+    var windowStart: Int { max(offset ?? 0, 0) }
+
+    /// How many columns the rows are laid out in. Nil means a flat run.
+    ///
+    /// Clamped at BOTH ends. Zero or negative would render an empty screen;
+    /// the ceiling is what stops a typo taking the host app down, because the
+    /// renderer pads the final row to a full width and `columns: 100000000`
+    /// asks it to build a hundred million empty cells.
+    ///
+    /// Twelve because a sheet is phone-width: at 320pt that is a cell of about
+    /// 26pt, and nothing legible is narrower.
+    var resolvedColumns: Int? {
+        guard let columns else { return nil }
+        return min(max(columns, 1), 12)
+    }
+
+    /// The DISPLAY index of the row sitting at `windowIndex` in this window.
+    ///
+    /// NOT the position within the window. `focusedIndex`, the coverflow draw
+    /// order and the scroll-fade distance are all display-space, so a window
+    /// counting from its own start would make an offset sheet believe its first
+    /// row was the centred card.
+    func displayIndex(ofRowAt windowIndex: Int) -> Int { windowStart + windowIndex }
+
+    /// Keeps only the offers this condition accepts, evaluated with each offer
+    /// in scope. Applied AFTER the window, so `offset` and `limit` keep meaning
+    /// a slice of the served list and the chip strip beside it still names every
+    /// category that slice holds.
+    ///
+    /// A FIELD, so an older SDK ignores it and renders the run unfiltered, which
+    /// is the whole list rather than a broken one.
+    var filter: SDUICondition?
+
+    /// The rows this loop renders: `offset` applied first, then `limit`.
+    ///
+    /// Both are clamped at zero, and that is not defensive tidying.
+    /// `dropFirst` and `prefix` trap on a negative argument, so a variant
+    /// carrying `"limit": -1` crashed the host app before this. The SDK's
+    /// first rule is that it never does that.
+    ///
+    /// An `offset` past the end renders nothing, which is the right answer:
+    /// there are no leftovers.
+    func window<C: Collection>(_ all: C) -> [C.Element] {
+        let rest = all.dropFirst(min(windowStart, all.count))
+        guard let limit else { return Array(rest) }
+        return Array(rest.prefix(max(limit, 0)))
+    }
+}
+
+/// An attribute of a row's own campaign, readable by `equals`.
+///
+/// Every other row-aware condition (`isSelectedOffer`, `isFirstOffer`,
+/// `offerIndexEquals`) tests position or selection. This is the only one that
+/// tests what the campaign IS, which is what filter chips, a per-row mechanic
+/// line and a per-card badge all need.
+///
+/// `hasFreeTrial` is NOT one of these: it resolves the publisher's own store
+/// product, not the campaign's badge.
+enum SDUIOfferAttribute: String, Decodable {
+    /// `free_trial` or `discount`, nil when the backend labelled nothing.
+    case badgeLabel
+    case perk
+    case advertiserName
+    /// The primary creative's advertiser copy. 173 of 180 creatives carry one,
+    /// so a card built on it needs to know about the seven that do not.
+    case description
+    /// The campaign's category, nil when it carries none. Compare against a
+    /// `categories` chip to filter a row.
+    case category
+    /// The link the backend minted for this offer, nil when it minted none.
+    /// Test it with `hasOfferAttribute`, not `equals`: a variant cannot know
+    /// the URL, only whether there is one to share.
+    case shareUrl
+    /// The advertiser's terms link, nil when the campaign carries none. Gate the
+    /// terms line on it: a link the SDK cannot open must not be drawn as one.
+    case termsUrl
+    /// The creative's short guidance phrases, nil when it carries none. Read as
+    /// text through the `offerQuickInstructions` binding.
+    case quickInstructions
+}
+
+/// Which probe observed an offer. Mirrors Android's `SduiImpressionSource`.
+enum SDUIImpressionSource: String {
+    /// The `forEach` row container, present for every offer a variant renders.
+    case row
+    /// The primary creative, the fallback for an offer drawn outside a row.
+    case creative
+}
+
+/// Which probe an offer `forEach` carries.
+enum SDUIImpressionProbe: String, Decodable {
+    case row
+    /// Named `off` rather than `none` so it cannot be confused with
+    /// `Optional.none` at a comparison site.
+    case off = "none"
 }
 
 enum SDUIDataSource: String, Decodable {
     case offers
     case pageIndicators
+    /// The distinct categories of the offers on screen, in first-appearance
+    /// order. Derived from the list, so a chip can never point at an empty one.
+    case categories
+    /// The scoped offer's own instruction steps, in authored order. Empty when
+    /// the creative carries none.
+    case instructions
 }
 
 struct SDUIConditional: Decodable {
@@ -422,14 +654,21 @@ struct SDUIConditional: Decodable {
 /// - `{"binding": "selectedAnswer"}` — `context.values["selectedAnswer"]`.
 /// - `{"state": true}` — the current state name.
 /// - `{"offerIndex": true}` — the current row offer's index (as a string).
+/// - `{"offerAttribute": "badgeLabel"}` — an attribute of the current row's own
+///   campaign, nil when the campaign does not carry it. Use `hasOfferAttribute`
+///   to test presence instead of a value.
+/// - `{"categoryName": true}` — the category the enclosing `categories` forEach
+///   is on, nil outside one.
 enum SDUIValueRef: Decodable {
     case literal(String)
     case binding(String)
     case state
     case offerIndex
+    case offerAttribute(SDUIOfferAttribute)
+    case categoryName
 
     private enum CodingKeys: String, CodingKey {
-        case value, binding, state, offerIndex
+        case value, binding, state, offerIndex, offerAttribute, categoryName
     }
 
     init(from decoder: Decoder) throws {
@@ -448,6 +687,10 @@ enum SDUIValueRef: Decodable {
             self = .state
         } else if container.contains(.offerIndex) {
             self = .offerIndex
+        } else if let attribute = try? container.decode(SDUIOfferAttribute.self, forKey: .offerAttribute) {
+            self = .offerAttribute(attribute)
+        } else if container.contains(.categoryName) {
+            self = .categoryName
         } else {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown value ref"))
         }
@@ -488,6 +731,14 @@ indirect enum SDUICondition: Decodable {
     /// True when both operands resolve to the same string.
     case equals(lhs: SDUIValueRef, rhs: SDUIValueRef)
 
+    /// True when the current row's campaign carries that attribute.
+    ///
+    /// `equals` cannot express presence, because an unset operand never
+    /// matches, so `not(equals(x, ""))` is true for both an absent value and a
+    /// present one. A control whose action needs a field has to read that
+    /// field, and `shareUrl` is the first one a variant cannot guess.
+    case hasOfferAttribute(SDUIOfferAttribute)
+
     // Offer-position predicates (row-aware, against the current forEach offer)
     case isFirstOffer
     case isLastOffer
@@ -500,6 +751,7 @@ indirect enum SDUICondition: Decodable {
         case hasIntroOffer, hasFreeTrial
         case isSelectedOffer
         case and, or, not, equals
+        case hasOfferAttribute
         case isFirstOffer, isLastOffer, isMiddleOffer, offerIndexEquals
     }
 
@@ -555,6 +807,8 @@ indirect enum SDUICondition: Decodable {
             self = .not(condition)
         } else if let data = try? container.decode(EqualsData.self, forKey: .equals) {
             self = .equals(lhs: data.lhs, rhs: data.rhs)
+        } else if let attribute = try? container.decode(SDUIOfferAttribute.self, forKey: .hasOfferAttribute) {
+            self = .hasOfferAttribute(attribute)
         } else if container.contains(.isFirstOffer) {
             self = .isFirstOffer
         } else if container.contains(.isLastOffer) {

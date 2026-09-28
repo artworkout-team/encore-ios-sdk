@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name         = "EncoreKit"
   s.module_name  = "Encore"
-  s.version      = "2.0.2"
+  s.version      = "2.2.0"
   s.summary      = "Encore iOS SDK"
   s.homepage     = "https://github.com/EncoreKit/ios-sdk"
   s.license      = { :type => "Proprietary" }
@@ -10,6 +10,7 @@ Pod::Spec.new do |s|
   s.ios.deployment_target = "15.0"
   s.swift_version = "5.9"
   s.source_files = "Sources/Encore/**/*.swift"
+  s.resource_bundles = { "EncoreKit_Privacy" => ["Sources/Encore/PrivacyInfo.xcprivacy"] }
 
   s.dependency "swift-openapi-runtime", "~> 1.0"
 

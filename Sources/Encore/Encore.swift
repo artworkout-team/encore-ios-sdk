@@ -48,7 +48,7 @@ public protocol EncoreProtocol: AnyObject {
 /// progressing app UI.
 @MainActor
 public final class Encore: EncoreProtocol {
-    internal static let sdkVersion: String = "2.0.2"
+    internal static let sdkVersion: String = "2.2.0"
     // Write-once references (assigned in configure(), read pervasively from
     // nonisolated accessors). Safe: Swift reference assignment is atomic and
     // these never change after configuration.
@@ -159,7 +159,8 @@ public final class Encore: EncoreProtocol {
         let config = Configuration(
             apiKey: apiKey,
             logLevel: options.logLevel,
-            unlock: options.unlock
+            unlock: options.unlock,
+            transactionLinking: options.transactionLinking
         )
         self.configuration = config
         self.lifecycle = AppLifecycle()
@@ -494,12 +495,18 @@ extension Encore {
         /// Controls when the SDK grants entitlements after an offer flow.
         public var unlock: UnlockMode
 
+        /// Scans StoreKit history and links each `originalTransactionID` for lift measurement.
+        /// Set `false` to stop that scan and those uploads; events still carry `app_account_id`.
+        public var transactionLinking: Bool
+
         public init(
             logLevel: LogLevel = .none,
-            unlock: UnlockMode = .optimistic
+            unlock: UnlockMode = .optimistic,
+            transactionLinking: Bool = true
         ) {
             self.logLevel = logLevel
             self.unlock = unlock
+            self.transactionLinking = transactionLinking
         }
     }
 }

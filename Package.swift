@@ -28,6 +28,13 @@ let package = Package(
                 .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Sources/Encore",
+            // Contract inputs, not shipped: they sit in Sources so the generator plugin finds them.
+            exclude: [
+                "Core/Infrastructure/Networking/openapi.json",
+                "Core/Infrastructure/Networking/openapi-generator-config.yaml",
+            ],
+            // Apple requires the SDK's own manifest for its UserDefaults use (ITMS-91053).
+            resources: [.copy("PrivacyInfo.xcprivacy")],
             swiftSettings: [
                 .enableExperimentalFeature("AccessLevelOnImport"),
                 // Surface v2: the facade is genuinely @MainActor; keep the

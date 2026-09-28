@@ -80,3 +80,23 @@ private struct VisibilityProbe: ViewModifier {
             .keyWindow?.bounds ?? UIScreen.main.bounds
     }
 }
+
+// MARK: - Optional Visibility Bridge
+
+/// Conditionally applies `View.onVisible` only when an action is provided.
+/// Skips wiring up `GeometryReader` / `onChange` instrumentation entirely
+/// when the caller doesn't ask to be notified.
+struct OptionallyOnVisible: ViewModifier {
+    let action: (() -> Void)?
+    /// `action` may only be nil for a reason that is constant for the life of
+    /// the view: this branch IS an identity change, and flipping it rebuilds
+    /// everything beneath.
+
+    func body(content: Content) -> some View {
+        if let action {
+            content.onVisible(perform: action)
+        } else {
+            content
+        }
+    }
+}

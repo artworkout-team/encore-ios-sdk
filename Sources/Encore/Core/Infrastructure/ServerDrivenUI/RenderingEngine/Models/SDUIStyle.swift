@@ -46,21 +46,14 @@ enum SDUISemanticColor: String, Decodable {
 /// - `.semantic(SDUISemanticColor)` — Apple's UIColor semantics (`.label`,
 ///   `.secondarySystemFill`, etc.). Adapt automatically to light/dark and
 ///   accessibility settings.
-/// - `.appearance(SDUIAppearanceColor)` — Encore app theme tokens (`.accent`,
-///   `.background`, `.onSurface`, etc.). Resolved at render time against the
-///   active `Appearance` for the current app, which is populated from the
-///   backend's per-app brand config. See `Appearance.swift` for the token
-///   vocabulary.
-///
-/// Variant authors should prefer `.appearance(_)` for any color that should
-/// reflect the host app's brand — not `.hex(_)`.
+/// - `.appearance(SDUIAppearanceColor)` — Encore theme tokens, resolved against the active
+///   `Appearance` (see `Appearance.swift`). Prefer these over `.hex(_)` for brand colours.
 /// - `.binding(key:fallback:)` — resolves a hex string from the render
 ///   context's values dictionary at render time (e.g.
 ///   `selectedOfferDominantColor`, `offerDominantColor`). When the key is
 ///   missing or empty, falls back to `fallback` (another `SDUIColor`) or
 ///   `.clear`. Bindings require the values-aware resolver
-///   (`resolved(in:values:)` / `SDUIContext.resolveColor`) — they cannot
-///   resolve through the legacy `.color` path that has no values dictionary.
+///   (`resolved(in:values:)` / `SDUIContext.resolveColor`).
 ///
 /// Any color form may carry post-resolution `transforms` (`opacity`,
 /// `lighten`, `darken`), authored as sibling keys in the same JSON object.
@@ -100,22 +93,6 @@ struct SDUIColor {
         SDUIColor(base: .binding(key: key, fallback: fallback))
     }
 
-    /// Legacy resolver kept for call sites that have not been migrated to
-    /// `resolved(in:)`. Returns `.clear` for `.appearance` and `.binding`
-    /// because neither has an `Appearance` / values dictionary in scope —
-    /// migrate those call sites to `resolved(in:values:)` when brand-aware
-    /// theming or data-bound colors matter.
-    var color: Color {
-        switch base {
-        case .hex(let hexString):
-            return Self.applyTransforms(transforms, to: Color(hex: hexString))
-        case .semantic(let semanticColor):
-            return Self.applyTransforms(transforms, to: semanticColor.color)
-        case .appearance, .binding:
-            return Self.applyTransforms(transforms, to: .clear)
-        }
-    }
-
     /// Resolves the color against an `Appearance` (no values dictionary).
     /// Bindings have no source here and fall back to their `fallback` (or
     /// `.clear`). Call `resolved(in:values:)` from imperative renderer sites
@@ -135,7 +112,7 @@ struct SDUIColor {
         case .hex(let hexString):
             return Color(hex: hexString)
         case .semantic(let semanticColor):
-            return semanticColor.color
+            return appearance.semanticColor(semanticColor)
         case .appearance(let token):
             return appearance.color(for: token)
         case .binding(let key, let fallback):
@@ -537,6 +514,52 @@ struct SDUICornerRadii: Decodable {
     }
 }
 
+/// The transform an element takes in ONE state of the state machine.
+///
+/// Only the four transform fields, deliberately. A state change animates
+/// position and appearance; it does not re-layout. Interpolating a frame or a
+/// corner radius across a transition is a different, much larger promise.
+struct SDUIStateStyle: Decodable {
+    var offset: SDUIOffset?
+    var scale: CGFloat?
+    var rotation: CGFloat?
+    var opacity: CGFloat?
+}
+
+/// How a state transition interpolates. Server-driven, so a designer can
+/// retime the gift box opening without a release.
+enum SDUIAnimationCurve: String, Decodable {
+    case linear
+    case easeIn
+    case easeOut
+    case easeInOut
+    /// Overshoots and settles. The lid leaving the box wants this.
+    case spring
+}
+
+struct SDUIAnimationSpec: Decodable {
+    var curve: SDUIAnimationCurve?
+    /// Seconds for the timing curves. A `spring` takes it as its RESPONSE, the
+    /// time to approach the target before it overshoots and settles, so it still
+    /// controls the pace rather than being ignored.
+    var duration: Double?
+
+    /// Clamped, because a negative duration is a SwiftUI precondition failure
+    /// and an absurd one stalls the sheet on a half-open box.
+    var resolvedDuration: Double { min(max(duration ?? 0.35, 0), 10) }
+
+    /// The spring's response, floored.
+    ///
+    /// A response of 0 is SwiftUI's infinitely stiff spring, which snaps, so
+    /// `duration: 0` would silently turn a spring into a cut.
+    var resolvedSpringResponse: Double {
+        min(max(duration ?? 0.35, Self.minimumSpringResponse), 10)
+    }
+
+    /// Below this a spring reads as a cut. Mirrors Android's floor.
+    static let minimumSpringResponse: Double = 0.05
+}
+
 /// Complete styling for any element
 struct SDUIStyle: Decodable {
     var padding: SDUIPadding?
@@ -571,6 +594,20 @@ struct SDUIStyle: Decodable {
 
     /// Translates the element by `{x, y}` points after layout.
     var offset: SDUIOffset?
+    /// Per-state transforms, keyed by state name.
+    ///
+    /// This is what makes a state change ANIMATE rather than cut. A
+    /// `conditional` on `stateEquals` can already vary an offset per state, but
+    /// it swaps view identity, so SwiftUI dissolves one subtree into another
+    /// instead of moving a lid. One element carrying a per-state style keeps
+    /// its identity across the transition, which is the whole point.
+    ///
+    /// A state this map does not name falls back to the base style, so the
+    /// closed box is authored once in the ordinary fields.
+    var stateStyles: [String: SDUIStateStyle]?
+    /// How to interpolate between those states. Absent means a hard cut, which
+    /// is what every shipped variant does today.
+    var stateAnimation: SDUIAnimationSpec?
     /// Uniform scale factor (1.0 = normal). Applied after frame.
     var scale: CGFloat?
     /// Rotation in degrees, clockwise. Applied after frame.
@@ -611,6 +648,35 @@ struct SDUIStyle: Decodable {
     var safeAreaPadding: SDUISafeAreaPadding?
 
     static let none = SDUIStyle()
+
+    /// This style as it applies in `state`.
+    ///
+    /// Only the four transform fields are overridden, and only the ones the
+    /// state actually names: everything else, including a transform the state
+    /// leaves out, keeps the base value. That holds per AXIS inside `offset`
+    /// too, so a state that moves a lid vertically keeps its authored `x`. So the closed box is authored once in
+    /// the ordinary fields and each state says only what moves.
+    ///
+    /// Returns self unchanged when there is no map or no entry for `state`,
+    /// which is every variant shipped today.
+    func resolved(forState state: String) -> SDUIStyle {
+        guard let override = stateStyles?[state] else { return self }
+        var copy = self
+        // Per AXIS, not per object. `x` and `y` are separately optional, so
+        // replacing the whole offset dropped the axis the state left out to
+        // zero and interpolated toward that.
+        if let offset = override.offset {
+            copy.offset = SDUIOffset(x: offset.x ?? copy.offset?.x,
+                                     y: offset.y ?? copy.offset?.y)
+        }
+        if let scale = override.scale { copy.scale = scale }
+        if let rotation = override.rotation { copy.rotation = rotation }
+        if let opacity = override.opacity { copy.opacity = opacity }
+        return copy
+    }
+
+    /// Whether this element takes part in state transitions at all.
+    var animatesStateChange: Bool { stateStyles?.isEmpty == false }
 
     /// Best-effort corner radius for the element, resolved from `cornerRadius`,
     /// `cornerRadii` (max corner), or a rectangle `clipShape`. Used to clip the

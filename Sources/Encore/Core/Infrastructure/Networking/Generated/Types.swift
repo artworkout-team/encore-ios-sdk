@@ -21,22 +21,22 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/search`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/search/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped — non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl` — route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries) — not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output
-    /// Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields — the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk) — so the integrator composes their own message. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
+    /// DEPRECATED (2026-08-24): kept serving for existing integrators; new integrations use /offers/feed. Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields, the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk), so the integrator composes their own message. Calling this endpoint is NOT itself the impression: it emits sdk_offer_requested and returns impressionUid; confirm display via POST /offers/impressions/{impressionUid}/delivered once the message is delivered. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/message`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/message/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Output
-    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression — the server emits one offer.requested per offer as the served baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression: the server emits one sdk_offer_requested per offer as the requests baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/feed`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/feed/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output
-    /// Record that a previously selected offer (impression) was actually shown to the end user — confirming an impression. Used by both the messaging surface (/offers/message) and the multi-offer feed (/offers/feed, called once per offer as it is displayed). Emits `offer.delivered`; analytics joins to `offer.requested` by impression_uid downstream. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Confirms an impression: call once per offer as it is displayed, for /offers/feed, /offers/catalog and /offers/message alike; the impression id comes from the serve response or the click url. Emits sdk_offer_presented keyed on the impression id; analytics stitches it to the serve in the warehouse. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/impressions/{impression_uid}/delivered`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/post`.
@@ -81,7 +81,7 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /publisher/sdk/v1/ui-config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/ui-config/get`.
     func get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config(_ input: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config.Input) async throws -> Operations.get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config.Output
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -96,6 +96,17 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `PATCH /publisher/sdk/v1/users/identify`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/identify/patch`.
     func patch_sol_publisher_sol_sdk_sol_v1_sol_users_sol_identify(_ input: Operations.patch_sol_publisher_sol_sdk_sol_v1_sol_users_sol_identify.Input) async throws -> Operations.patch_sol_publisher_sol_sdk_sol_v1_sol_users_sol_identify.Output
+    /// Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.
+    ///
+    /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    ///
+    /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/users/attributes`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post`.
+    func post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output
     /// Link Apple Account to subscription chain (appTransactionId ↔ originalTransactionId). Idempotent: updates last_observed_at if exists. Used for NCL attribution via webhooks.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/iap-links`.
@@ -106,7 +117,7 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /publisher/sdk/v1/promo-signature`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/promo-signature/get`.
     func get_sol_publisher_sol_sdk_sol_v1_sol_promo_hyphen_signature(_ input: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_promo_hyphen_signature.Input) async throws -> Operations.get_sol_publisher_sol_sdk_sol_v1_sol_promo_hyphen_signature.Output
-    /// Simulate a conversion postback for the Paramount+ Encore Demo campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
+    /// Simulate a conversion postback for the Halcyon Stream campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/test/conversions/complete`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/test/conversions/complete/post`.
@@ -196,7 +207,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped — non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl` — route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries) — not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
@@ -209,7 +220,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields — the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk) — so the integrator composes their own message. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
+    /// DEPRECATED (2026-08-24): kept serving for existing integrators; new integrations use /offers/feed. Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields, the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk), so the integrator composes their own message. Calling this endpoint is NOT itself the impression: it emits sdk_offer_requested and returns impressionUid; confirm display via POST /offers/impressions/{impressionUid}/delivered once the message is delivered. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/message`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/message/post`.
@@ -222,7 +233,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression — the server emits one offer.requested per offer as the served baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression: the server emits one sdk_offer_requested per offer as the requests baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/feed`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/feed/post`.
@@ -235,7 +246,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Record that a previously selected offer (impression) was actually shown to the end user — confirming an impression. Used by both the messaging surface (/offers/message) and the multi-offer feed (/offers/feed, called once per offer as it is displayed). Emits `offer.delivered`; analytics joins to `offer.requested` by impression_uid downstream. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Confirms an impression: call once per offer as it is displayed, for /offers/feed, /offers/catalog and /offers/message alike; the impression id comes from the serve response or the click url. Emits sdk_offer_presented keyed on the impression id; analytics stitches it to the serve in the warehouse. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/impressions/{impression_uid}/delivered`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/post`.
@@ -358,7 +369,7 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -397,6 +408,25 @@ extension APIProtocol {
             body: body
         ))
     }
+    /// Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.
+    ///
+    /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    ///
+    /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/users/attributes`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post`.
+    internal func post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes(
+        headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Headers = .init(),
+        body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body
+    ) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output {
+        try await post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input(
+            headers: headers,
+            body: body
+        ))
+    }
     /// Link Apple Account to subscription chain (appTransactionId ↔ originalTransactionId). Idempotent: updates last_observed_at if exists. Used for NCL attribution via webhooks.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/iap-links`.
@@ -423,7 +453,7 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Simulate a conversion postback for the Paramount+ Encore Demo campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
+    /// Simulate a conversion postback for the Halcyon Stream campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/test/conversions/complete`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/test/conversions/complete/post`.
@@ -860,6 +890,7 @@ internal enum Operations {
                                 case CPA = "CPA"
                                 case CPC = "CPC"
                                 case CPI = "CPI"
+                                case CPL = "CPL"
                                 case CPM = "CPM"
                             }
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/payoutModel`.
@@ -926,6 +957,10 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/defaultCatalog`.
                             internal var defaultCatalog: Swift.Bool
+                            /// When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/isDemo`.
+                            internal var isDemo: Swift.Bool?
                             /// Deprecated; always 'whitelist'. Retained because iOS/Android SDK decoders require the field. Access is governed solely by campaign_allowed_apps + enabled.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/targetingMode`.
@@ -960,6 +995,14 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/badgeLabel`.
                             internal var badgeLabel: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload?
+                            /// Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/heroImageUrl`.
+                            internal var heroImageUrl: Swift.String?
+                            /// https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/termsUrl`.
+                            internal var termsUrl: Swift.String?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/createdAt`.
                             internal var createdAt: Foundation.Date
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/updatedAt`.
@@ -1609,11 +1652,14 @@ internal enum Operations {
                             ///   - publisherNotes: Publisher-facing notes about this offer
                             ///   - priority:
                             ///   - defaultCatalog: When true, this campaign is auto-granted to every newly created app. Independent of priority (which controls ranking order only).
+                            ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
                             ///   - targetingMode: Deprecated; always 'whitelist'. Retained because iOS/Android SDK decoders require the field. Access is governed solely by campaign_allowed_apps + enabled.
                             ///   - newPrice: New/discounted price for the offer
                             ///   - oldPrice: Original price before discount
                             ///   - perk: User-facing value proposition, e.g., "3 months of Hulu free". Rendered in the deal email.
                             ///   - badgeLabel: Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge.
+                            ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
                             ///   - createdAt:
                             ///   - updatedAt:
                             ///   - organization: Included when fetching with relations
@@ -1636,11 +1682,14 @@ internal enum Operations {
                                 publisherNotes: Swift.String? = nil,
                                 priority: Swift.Int? = nil,
                                 defaultCatalog: Swift.Bool,
+                                isDemo: Swift.Bool? = nil,
                                 targetingMode: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.targetingModePayload,
                                 newPrice: Swift.String? = nil,
                                 oldPrice: Swift.String? = nil,
                                 perk: Swift.String? = nil,
                                 badgeLabel: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
+                                heroImageUrl: Swift.String? = nil,
+                                termsUrl: Swift.String? = nil,
                                 createdAt: Foundation.Date,
                                 updatedAt: Foundation.Date,
                                 organization: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
@@ -1663,11 +1712,14 @@ internal enum Operations {
                                 self.publisherNotes = publisherNotes
                                 self.priority = priority
                                 self.defaultCatalog = defaultCatalog
+                                self.isDemo = isDemo
                                 self.targetingMode = targetingMode
                                 self.newPrice = newPrice
                                 self.oldPrice = oldPrice
                                 self.perk = perk
                                 self.badgeLabel = badgeLabel
+                                self.heroImageUrl = heroImageUrl
+                                self.termsUrl = termsUrl
                                 self.createdAt = createdAt
                                 self.updatedAt = updatedAt
                                 self.organization = organization
@@ -1691,11 +1743,14 @@ internal enum Operations {
                                 case publisherNotes
                                 case priority
                                 case defaultCatalog
+                                case isDemo
                                 case targetingMode
                                 case newPrice
                                 case oldPrice
                                 case perk
                                 case badgeLabel
+                                case heroImageUrl
+                                case termsUrl
                                 case createdAt
                                 case updatedAt
                                 case organization
@@ -2153,7 +2208,7 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/variantId`.
                     internal var variantId: Swift.String?
-                    /// Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Best-effort analytics context: when supplied it is stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself.
+                    /// Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/placementId`.
                     internal var placementId: Swift.String?
@@ -2161,6 +2216,29 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/maxPostbackTimeMs`.
                     internal var maxPostbackTimeMs: Swift.Int?
+                    /// Request-scoped serving context. Unknown keys are ignored.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/context`.
+                    internal struct contextPayload: Codable, Hashable, Sendable {
+                        /// Request-scoped activity the user is engaged in at serve time (what the surface is being used for, not a persisted user property). Recognized values: laundry, vending, car_wash, air_vacuum, amusement. Any other value is accepted and recorded on serve analytics, so unrecognized activities show up in reporting rather than failing the request. Does not change which offers are served today.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/context/activity`.
+                        internal var activity: Swift.String?
+                        /// Creates a new `contextPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - activity: Request-scoped activity the user is engaged in at serve time (what the surface is being used for, not a persisted user property). Recognized values: laundry, vending, car_wash, air_vacuum, amusement. Any other value is accepted and recorded on serve analytics, so unrecognized activities show up in reporting rather than failing the request. Does not change which offers are served today.
+                        internal init(activity: Swift.String? = nil) {
+                            self.activity = activity
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case activity
+                        }
+                    }
+                    /// Request-scoped serving context. Unknown keys are ignored.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/context`.
+                    internal var context: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.contextPayload?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
@@ -2172,8 +2250,9 @@ internal enum Operations {
                     ///   - sdkVersion: SDK version in semver format (e.g., "1.2.3")
                     ///   - platform: Client platform: android, ios, or web
                     ///   - variantId: SDUI variant ID from frontend config fetch. If provided, filters creatives by variant assignment. If not provided, no variant filtering is applied.
-                    ///   - placementId: Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Best-effort analytics context: when supplied it is stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself.
+                    ///   - placementId: Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself.
                     ///   - maxPostbackTimeMs: Strict unlock mode: only include campaigns whose postback latency is less than or equal to this value (in milliseconds). Omit for no filtering. Bounded 1000..120000.
+                    ///   - context: Request-scoped serving context. Unknown keys are ignored.
                     internal init(
                         userId: Swift.String,
                         attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.attributesPayload? = nil,
@@ -2184,7 +2263,8 @@ internal enum Operations {
                         platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.platformPayload? = nil,
                         variantId: Swift.String? = nil,
                         placementId: Swift.String? = nil,
-                        maxPostbackTimeMs: Swift.Int? = nil
+                        maxPostbackTimeMs: Swift.Int? = nil,
+                        context: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.contextPayload? = nil
                     ) {
                         self.userId = userId
                         self.attributes = attributes
@@ -2196,6 +2276,7 @@ internal enum Operations {
                         self.variantId = variantId
                         self.placementId = placementId
                         self.maxPostbackTimeMs = maxPostbackTimeMs
+                        self.context = context
                     }
                     internal enum CodingKeys: String, CodingKey {
                         case userId
@@ -2208,6 +2289,7 @@ internal enum Operations {
                         case variantId
                         case placementId
                         case maxPostbackTimeMs
+                        case context
                     }
                 }
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/content/application\/json`.
@@ -2248,6 +2330,7 @@ internal enum Operations {
                                 case CPA = "CPA"
                                 case CPC = "CPC"
                                 case CPI = "CPI"
+                                case CPL = "CPL"
                                 case CPM = "CPM"
                             }
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/payoutModel`.
@@ -2314,6 +2397,10 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/defaultCatalog`.
                             internal var defaultCatalog: Swift.Bool
+                            /// When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/isDemo`.
+                            internal var isDemo: Swift.Bool?
                             /// Deprecated; always 'whitelist'. Retained because iOS/Android SDK decoders require the field. Access is governed solely by campaign_allowed_apps + enabled.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/targetingMode`.
@@ -2348,6 +2435,14 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/badgeLabel`.
                             internal var badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload?
+                            /// Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/heroImageUrl`.
+                            internal var heroImageUrl: Swift.String?
+                            /// https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/termsUrl`.
+                            internal var termsUrl: Swift.String?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/createdAt`.
                             internal var createdAt: Foundation.Date
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/updatedAt`.
@@ -2977,6 +3072,47 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creatives`.
                             internal var creatives: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayload?
+                            /// Opaque link a user can send to someone else for this campaign. A claim made through it attributes back to the user who shared it. MUST be absolute and http or https: both SDKs drop anything else while parsing, so a scheme-less or relative value reads as absent and no share control is drawn. ABSENT until share links ship, and a client that finds it absent must share nothing rather than falling back to another URL: an unattributed link loses the claim the share exists to carry. /offers/search only. Deliberately a plain string, not `format: uri`: that format makes the Kotlin generator emit java.net.URI, and a link its parser rejects would fail the WHOLE offers decode on Android rather than just the share button.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/shareUrl`.
+                            internal var shareUrl: Swift.String?
+                            /// Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/category`.
+                            internal var category: Swift.String?
+                            /// The gift-sheet group this campaign files under: "Watch & listen", "Money" or "Everyday". Derived from `category` by the server so a native chip strip shows what web tabs show without holding the taxonomy map. Always set: an absent, blank or unmapped category files under "Everyday", so every offer sits in some group. Whether a strip is worth drawing is the client's call, because only it knows which offers its sheet lists. /offers/search only: web-sdk holds its own copy of the map and groups `category` itself.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/categoryGroup`.
+                            internal var categoryGroup: Swift.String?
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal struct rewardConfirmationTimePayload: Codable, Hashable, Sendable {
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/medianSeconds`.
+                                internal var medianSeconds: Swift.Int
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/p90Seconds`.
+                                internal var p90Seconds: Swift.Int
+                                /// Creates a new `rewardConfirmationTimePayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - medianSeconds:
+                                ///   - p90Seconds:
+                                internal init(
+                                    medianSeconds: Swift.Int,
+                                    p90Seconds: Swift.Int
+                                ) {
+                                    self.medianSeconds = medianSeconds
+                                    self.p90Seconds = p90Seconds
+                                }
+                                internal enum CodingKeys: String, CodingKey {
+                                    case medianSeconds
+                                    case p90Seconds
+                                }
+                            }
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal var rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload?
                             /// Creates a new `offersPayloadPayload`.
                             ///
                             /// - Parameters:
@@ -2997,15 +3133,22 @@ internal enum Operations {
                             ///   - publisherNotes: Publisher-facing notes about this offer
                             ///   - priority:
                             ///   - defaultCatalog: When true, this campaign is auto-granted to every newly created app. Independent of priority (which controls ranking order only).
+                            ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
                             ///   - targetingMode: Deprecated; always 'whitelist'. Retained because iOS/Android SDK decoders require the field. Access is governed solely by campaign_allowed_apps + enabled.
                             ///   - newPrice: New/discounted price for the offer
                             ///   - oldPrice: Original price before discount
                             ///   - perk: User-facing value proposition, e.g., "3 months of Hulu free". Rendered in the deal email.
                             ///   - badgeLabel: Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge.
+                            ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
                             ///   - createdAt:
                             ///   - updatedAt:
                             ///   - organization: Included when fetching with relations
                             ///   - creatives: Included if includeCreatives=true
+                            ///   - shareUrl: Opaque link a user can send to someone else for this campaign. A claim made through it attributes back to the user who shared it. MUST be absolute and http or https: both SDKs drop anything else while parsing, so a scheme-less or relative value reads as absent and no share control is drawn. ABSENT until share links ship, and a client that finds it absent must share nothing rather than falling back to another URL: an unattributed link loses the claim the share exists to carry. /offers/search only. Deliberately a plain string, not `format: uri`: that format makes the Kotlin generator emit java.net.URI, and a link its parser rejects would fail the WHOLE offers decode on Android rather than just the share button.
+                            ///   - category: Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
+                            ///   - categoryGroup: The gift-sheet group this campaign files under: "Watch & listen", "Money" or "Everyday". Derived from `category` by the server so a native chip strip shows what web tabs show without holding the taxonomy map. Always set: an absent, blank or unmapped category files under "Everyday", so every offer sits in some group. Whether a strip is worth drawing is the client's call, because only it knows which offers its sheet lists. /offers/search only: web-sdk holds its own copy of the map and groups `category` itself.
+                            ///   - rewardConfirmationTime: Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             internal init(
                                 id: Swift.String,
                                 organizationId: Swift.String,
@@ -3024,15 +3167,22 @@ internal enum Operations {
                                 publisherNotes: Swift.String? = nil,
                                 priority: Swift.Int? = nil,
                                 defaultCatalog: Swift.Bool,
+                                isDemo: Swift.Bool? = nil,
                                 targetingMode: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.targetingModePayload,
                                 newPrice: Swift.String? = nil,
                                 oldPrice: Swift.String? = nil,
                                 perk: Swift.String? = nil,
                                 badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
+                                heroImageUrl: Swift.String? = nil,
+                                termsUrl: Swift.String? = nil,
                                 createdAt: Foundation.Date,
                                 updatedAt: Foundation.Date,
                                 organization: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
-                                creatives: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayload? = nil
+                                creatives: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayload? = nil,
+                                shareUrl: Swift.String? = nil,
+                                category: Swift.String? = nil,
+                                categoryGroup: Swift.String? = nil,
+                                rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil
                             ) {
                                 self.id = id
                                 self.organizationId = organizationId
@@ -3051,15 +3201,22 @@ internal enum Operations {
                                 self.publisherNotes = publisherNotes
                                 self.priority = priority
                                 self.defaultCatalog = defaultCatalog
+                                self.isDemo = isDemo
                                 self.targetingMode = targetingMode
                                 self.newPrice = newPrice
                                 self.oldPrice = oldPrice
                                 self.perk = perk
                                 self.badgeLabel = badgeLabel
+                                self.heroImageUrl = heroImageUrl
+                                self.termsUrl = termsUrl
                                 self.createdAt = createdAt
                                 self.updatedAt = updatedAt
                                 self.organization = organization
                                 self.creatives = creatives
+                                self.shareUrl = shareUrl
+                                self.category = category
+                                self.categoryGroup = categoryGroup
+                                self.rewardConfirmationTime = rewardConfirmationTime
                             }
                             internal enum CodingKeys: String, CodingKey {
                                 case id
@@ -3079,15 +3236,22 @@ internal enum Operations {
                                 case publisherNotes
                                 case priority
                                 case defaultCatalog
+                                case isDemo
                                 case targetingMode
                                 case newPrice
                                 case oldPrice
                                 case perk
                                 case badgeLabel
+                                case heroImageUrl
+                                case termsUrl
                                 case createdAt
                                 case updatedAt
                                 case organization
                                 case creatives
+                                case shareUrl
+                                case category
+                                case categoryGroup
+                                case rewardConfirmationTime
                             }
                         }
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offers`.
@@ -3227,6 +3391,80 @@ internal enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/search/post/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            internal var badRequest: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
                             response: self
                         )
                     }
@@ -3485,7 +3723,7 @@ internal enum Operations {
             }
         }
     }
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped — non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl` — route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries) — not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
@@ -3520,6 +3758,22 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/countryCode`.
                     internal var countryCode: Swift.String?
+                    /// Optional device family of the END USER the offers will be shown to (enum; any other value is rejected with 400). Analytics dimension only (platform on the serve event); never 'api'.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/platform`.
+                    internal enum platformPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case android = "android"
+                        case ios = "ios"
+                        case web = "web"
+                    }
+                    /// Optional device family of the END USER the offers will be shown to (enum; any other value is rejected with 400). Analytics dimension only (platform on the serve event); never 'api'.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/platform`.
+                    internal var platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Input.Body.jsonPayload.platformPayload?
+                    /// Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. A per-placement offer rule NEVER applies here. `/offers/catalog` returns inventory rather than a served set, so a rule configured for this label does not select or order what comes back. Scope an inventory pull on your own filters, never on a rule.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/placementId`.
+                    internal var placementId: Swift.String?
                     /// CONFIG-TIME ONLY. When true, skips geo-filtering and returns the full addressable inventory for your app (entitlement still applies), with each offer's targetCountries — use this to build your curation. Do NOT use for offers displayed to an end user; those must come from a geo-scoped request (countryCode or forwarded IP). When true, no geography signal is required and countryCode is ignored.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/includeAllRegions`.
@@ -3538,6 +3792,8 @@ internal enum Operations {
                     ///   - userId: Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), and it drives per-user fraud controls (trial caps, retake blocking) at click time. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls).
                     ///   - clientId: Optional identifier for the operator/sub-publisher on whose behalf offers are shown. Carried through as an analytics dimension. Defaults to userId when omitted.
                     ///   - countryCode: ISO 3166-1 alpha-2 country code of the END USER the offers will be shown to (e.g. "US", "GB"). Provides the geography signal for geo-filtering. Resolution: this value → client IP (X-Forwarded-For aware) → (rejected if neither resolves). Send it when calling server-to-server without forwarding the end user's IP; omit it when the end user (or a proxy forwarding their IP) is the caller. Ignored when includeAllRegions is true.
+                    ///   - platform: Optional device family of the END USER the offers will be shown to (enum; any other value is rejected with 400). Analytics dimension only (platform on the serve event); never 'api'.
+                    ///   - placementId: Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. A per-placement offer rule NEVER applies here. `/offers/catalog` returns inventory rather than a served set, so a rule configured for this label does not select or order what comes back. Scope an inventory pull on your own filters, never on a rule.
                     ///   - includeAllRegions: CONFIG-TIME ONLY. When true, skips geo-filtering and returns the full addressable inventory for your app (entitlement still applies), with each offer's targetCountries — use this to build your curation. Do NOT use for offers displayed to an end user; those must come from a geo-scoped request (countryCode or forwarded IP). When true, no geography signal is required and countryCode is ignored.
                     ///   - limit: Optional page size (1..100). OMIT to return ALL eligible offers (the default) — catalogs are small enough that you normally take the whole set and curate client-side. Provide only if you want to page (with offset).
                     ///   - offset: Pagination offset (default 0). Only meaningful together with limit.
@@ -3545,6 +3801,8 @@ internal enum Operations {
                         userId: Swift.String? = nil,
                         clientId: Swift.String? = nil,
                         countryCode: Swift.String? = nil,
+                        platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Input.Body.jsonPayload.platformPayload? = nil,
+                        placementId: Swift.String? = nil,
                         includeAllRegions: Swift.Bool? = nil,
                         limit: Swift.Int? = nil,
                         offset: Swift.Int? = nil
@@ -3552,6 +3810,8 @@ internal enum Operations {
                         self.userId = userId
                         self.clientId = clientId
                         self.countryCode = countryCode
+                        self.platform = platform
+                        self.placementId = placementId
                         self.includeAllRegions = includeAllRegions
                         self.limit = limit
                         self.offset = offset
@@ -3560,6 +3820,8 @@ internal enum Operations {
                         case userId
                         case clientId
                         case countryCode
+                        case platform
+                        case placementId
                         case includeAllRegions
                         case limit
                         case offset
@@ -3621,6 +3883,43 @@ internal enum Operations {
                             internal var newPrice: Swift.String?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/targetCountries`.
                             internal var targetCountries: [Swift.String]
+                            /// When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/isDemo`.
+                            internal var isDemo: Swift.Bool?
+                            /// https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/termsUrl`.
+                            internal var termsUrl: Swift.String?
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal struct rewardConfirmationTimePayload: Codable, Hashable, Sendable {
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/medianSeconds`.
+                                internal var medianSeconds: Swift.Int
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/p90Seconds`.
+                                internal var p90Seconds: Swift.Int
+                                /// Creates a new `rewardConfirmationTimePayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - medianSeconds:
+                                ///   - p90Seconds:
+                                internal init(
+                                    medianSeconds: Swift.Int,
+                                    p90Seconds: Swift.Int
+                                ) {
+                                    self.medianSeconds = medianSeconds
+                                    self.p90Seconds = p90Seconds
+                                }
+                                internal enum CodingKeys: String, CodingKey {
+                                    case medianSeconds
+                                    case p90Seconds
+                                }
+                            }
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal var rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/organization`.
                             internal struct organizationPayload: Codable, Hashable, Sendable {
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/organization/id`.
@@ -3696,6 +3995,49 @@ internal enum Operations {
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/supportedPlatforms`.
                                 internal var supportedPlatforms: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.supportedPlatformsPayload?
+                                /// Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload`.
+                                internal struct instructionsPayloadPayload: Codable, Hashable, Sendable {
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/title`.
+                                    internal var title: Swift.String
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/subtitle`.
+                                    internal var subtitle: Swift.String
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/ctaButtonText`.
+                                    internal var ctaButtonText: Swift.String?
+                                    /// Creates a new `instructionsPayloadPayload`.
+                                    ///
+                                    /// - Parameters:
+                                    ///   - title:
+                                    ///   - subtitle:
+                                    ///   - ctaButtonText:
+                                    internal init(
+                                        title: Swift.String,
+                                        subtitle: Swift.String,
+                                        ctaButtonText: Swift.String? = nil
+                                    ) {
+                                        self.title = title
+                                        self.subtitle = subtitle
+                                        self.ctaButtonText = ctaButtonText
+                                    }
+                                    internal enum CodingKeys: String, CodingKey {
+                                        case title
+                                        case subtitle
+                                        case ctaButtonText
+                                    }
+                                }
+                                /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructions`.
+                                internal typealias instructionsPayload = [Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.instructionsPayloadPayload]
+                                /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructions`.
+                                internal var instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.instructionsPayload?
+                                /// A short one line version of the instructions, e.g. "sign up, complete one survey". Null or absent: the creative has none.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/quickInstructions`.
+                                internal var quickInstructions: Swift.String?
                                 /// Tokenized click URL for THIS creative. Send the end user here when they tap the offer: it records a transaction attributed to (your app, this offer, this creative, the userId you supplied) and 302-redirects to the advertiser with the transaction id substituted. Treat it as opaque, do not modify it. Present on serve responses; absent when includeAllRegions is set.
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/clickUrl`.
@@ -3712,6 +4054,8 @@ internal enum Operations {
                                 ///   - additionalImages:
                                 ///   - ctaText:
                                 ///   - supportedPlatforms: Platforms this creative supports (empty = all platforms)
+                                ///   - instructions: Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                                ///   - quickInstructions: A short one line version of the instructions, e.g. "sign up, complete one survey". Null or absent: the creative has none.
                                 ///   - clickUrl: Tokenized click URL for THIS creative. Send the end user here when they tap the offer: it records a transaction attributed to (your app, this offer, this creative, the userId you supplied) and 302-redirects to the advertiser with the transaction id substituted. Treat it as opaque, do not modify it. Present on serve responses; absent when includeAllRegions is set.
                                 internal init(
                                     id: Swift.String,
@@ -3723,6 +4067,8 @@ internal enum Operations {
                                     additionalImages: [Swift.String]? = nil,
                                     ctaText: Swift.String,
                                     supportedPlatforms: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.supportedPlatformsPayload? = nil,
+                                    instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.instructionsPayload? = nil,
+                                    quickInstructions: Swift.String? = nil,
                                     clickUrl: Swift.String? = nil
                                 ) {
                                     self.id = id
@@ -3734,6 +4080,8 @@ internal enum Operations {
                                     self.additionalImages = additionalImages
                                     self.ctaText = ctaText
                                     self.supportedPlatforms = supportedPlatforms
+                                    self.instructions = instructions
+                                    self.quickInstructions = quickInstructions
                                     self.clickUrl = clickUrl
                                 }
                                 internal enum CodingKeys: String, CodingKey {
@@ -3746,6 +4094,8 @@ internal enum Operations {
                                     case additionalImages
                                     case ctaText
                                     case supportedPlatforms
+                                    case instructions
+                                    case quickInstructions
                                     case clickUrl
                                 }
                             }
@@ -3763,6 +4113,9 @@ internal enum Operations {
                             ///   - oldPrice: Original price before discount
                             ///   - newPrice: New/discounted price for the offer
                             ///   - targetCountries:
+                            ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - rewardConfirmationTime: Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             ///   - organization:
                             ///   - creatives:
                             internal init(
@@ -3773,6 +4126,9 @@ internal enum Operations {
                                 oldPrice: Swift.String? = nil,
                                 newPrice: Swift.String? = nil,
                                 targetCountries: [Swift.String],
+                                isDemo: Swift.Bool? = nil,
+                                termsUrl: Swift.String? = nil,
+                                rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil,
                                 organization: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
                                 creatives: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayload? = nil
                             ) {
@@ -3783,6 +4139,9 @@ internal enum Operations {
                                 self.oldPrice = oldPrice
                                 self.newPrice = newPrice
                                 self.targetCountries = targetCountries
+                                self.isDemo = isDemo
+                                self.termsUrl = termsUrl
+                                self.rewardConfirmationTime = rewardConfirmationTime
                                 self.organization = organization
                                 self.creatives = creatives
                             }
@@ -3794,6 +4153,9 @@ internal enum Operations {
                                 case oldPrice
                                 case newPrice
                                 case targetCountries
+                                case isDemo
+                                case termsUrl
+                                case rewardConfirmationTime
                                 case organization
                                 case creatives
                             }
@@ -4177,7 +4539,7 @@ internal enum Operations {
             }
         }
     }
-    /// Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields — the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk) — so the integrator composes their own message. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
+    /// DEPRECATED (2026-08-24): kept serving for existing integrators; new integrations use /offers/feed. Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields, the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk), so the integrator composes their own message. Calling this endpoint is NOT itself the impression: it emits sdk_offer_requested and returns impressionUid; confirm display via POST /offers/impressions/{impressionUid}/delivered once the message is delivered. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/message`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/message/post`.
@@ -4257,25 +4619,33 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes`.
                     internal var attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload
+                    /// Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/placementId`.
+                    internal var placementId: Swift.String?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
                     ///   - clientId: Stable identifier for the integrator-client (the business / operator the message is being sent on behalf of). Carried through as an analytics dimension so impressions, clicks, and conversions can be broken down per client.
                     ///   - chatId: Conversation / thread identifier on the messaging platform. Used as the messaging-surface userId — drives bandit seeding for `/offers/message`, the transaction created at click time, and the userId dimension on the click event.
                     ///   - attributes: Targeting attributes — countryCode and language are required; platform is optional (omit for a platform='api' app to receive all offers untrimmed).
+                    ///   - placementId: Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served.
                     internal init(
                         clientId: Swift.String,
                         chatId: Swift.String,
-                        attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload
+                        attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload,
+                        placementId: Swift.String? = nil
                     ) {
                         self.clientId = clientId
                         self.chatId = chatId
                         self.attributes = attributes
+                        self.placementId = placementId
                     }
                     internal enum CodingKeys: String, CodingKey {
                         case clientId
                         case chatId
                         case attributes
+                        case placementId
                     }
                 }
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/content/application\/json`.
@@ -4303,6 +4673,10 @@ internal enum Operations {
                     internal struct jsonPayload: Codable, Hashable, Sendable {
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/success`.
                         internal var success: Swift.Bool
+                        /// Handle for the served offer; POST /offers/impressions/{impressionUid}/delivered when the message is confirmed delivered to the user (that call is the impression). Absent when no offer was served.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/impressionUid`.
+                        internal var impressionUid: Swift.String?
                         /// Selected offer details — the branded short clickUrl plus context fields — for the integrator to compose and send their own message, or null when no eligible offer was found. No message is composed server-side.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/offer`.
@@ -4327,6 +4701,10 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/offer/advertiserName`.
                             internal var advertiserName: Swift.String
+                            /// When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/offer/isDemo`.
+                            internal var isDemo: Swift.Bool?
                             /// Campaign value proposition (e.g. "3 months of Apple Music free"), or null when the campaign has none. Surfaced explicitly so integrators can render the deal in the message they compose.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/200/content/json/offer/perk`.
@@ -4350,6 +4728,7 @@ internal enum Operations {
                             ///   - description: Longer creative description, or null when the creative has none.
                             ///   - imageUrl: Primary creative image URL.
                             ///   - advertiserName: Display name of the advertiser (organization) behind the offer.
+                            ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
                             ///   - perk: Campaign value proposition (e.g. "3 months of Apple Music free"), or null when the campaign has none. Surfaced explicitly so integrators can render the deal in the message they compose.
                             ///   - badgeLabel: Constrained promo badge for the in-app offer card: "free_trial" | "discount", or null when the campaign has none. Distinct from perk (longer value proposition). Clients map the enum to display text ("Free trial" / "Discount") and free-trial-vs-discount logic. Surfaced additively.
                             internal init(
@@ -4358,6 +4737,7 @@ internal enum Operations {
                                 description: Swift.String? = nil,
                                 imageUrl: Swift.String,
                                 advertiserName: Swift.String,
+                                isDemo: Swift.Bool? = nil,
                                 perk: Swift.String? = nil,
                                 badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Output.Ok.Body.jsonPayload.offerPayload.badgeLabelPayload? = nil
                             ) {
@@ -4366,6 +4746,7 @@ internal enum Operations {
                                 self.description = description
                                 self.imageUrl = imageUrl
                                 self.advertiserName = advertiserName
+                                self.isDemo = isDemo
                                 self.perk = perk
                                 self.badgeLabel = badgeLabel
                             }
@@ -4375,6 +4756,7 @@ internal enum Operations {
                                 case description
                                 case imageUrl
                                 case advertiserName
+                                case isDemo
                                 case perk
                                 case badgeLabel
                             }
@@ -4387,16 +4769,20 @@ internal enum Operations {
                         ///
                         /// - Parameters:
                         ///   - success:
+                        ///   - impressionUid: Handle for the served offer; POST /offers/impressions/{impressionUid}/delivered when the message is confirmed delivered to the user (that call is the impression). Absent when no offer was served.
                         ///   - offer: Selected offer details — the branded short clickUrl plus context fields — for the integrator to compose and send their own message, or null when no eligible offer was found. No message is composed server-side.
                         internal init(
                             success: Swift.Bool,
+                            impressionUid: Swift.String? = nil,
                             offer: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Output.Ok.Body.jsonPayload.offerPayload? = nil
                         ) {
                             self.success = success
+                            self.impressionUid = impressionUid
                             self.offer = offer
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case success
+                            case impressionUid
                             case offer
                         }
                     }
@@ -4701,7 +5087,7 @@ internal enum Operations {
             }
         }
     }
-    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression — the server emits one offer.requested per offer as the served baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression: the server emits one sdk_offer_requested per offer as the requests baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/feed`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/feed/post`.
@@ -4785,6 +5171,10 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/limit`.
                     internal var limit: Swift.Int?
+                    /// Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/placementId`.
+                    internal var placementId: Swift.String?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
@@ -4792,22 +5182,26 @@ internal enum Operations {
                     ///   - userId: End-user identifier on the partner surface. Used as the bandit-seeding userId for ranking and as the userId on the transaction created at click time.
                     ///   - attributes: Targeting attributes — countryCode and language are required; platform is optional (omit for a platform='api' app to receive all offers untrimmed).
                     ///   - limit: Maximum number of offers to return (1–25, default 10). The client controls display order and cycles through them one at a time.
+                    ///   - placementId: Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served.
                     internal init(
                         clientId: Swift.String,
                         userId: Swift.String,
                         attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload,
-                        limit: Swift.Int? = nil
+                        limit: Swift.Int? = nil,
+                        placementId: Swift.String? = nil
                     ) {
                         self.clientId = clientId
                         self.userId = userId
                         self.attributes = attributes
                         self.limit = limit
+                        self.placementId = placementId
                     }
                     internal enum CodingKeys: String, CodingKey {
                         case clientId
                         case userId
                         case attributes
                         case limit
+                        case placementId
                     }
                 }
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/content/application\/json`.
@@ -4845,6 +5239,10 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/clickUrl`.
                             internal var clickUrl: Swift.String
+                            /// Stable identifier for the offer (campaign). Use THIS to match a completion back to the offer you displayed: the `offer_completed` webhook carries the same value as its `campaignId`. Unlike `title` (which is per-creative and localized) and `campaignName` (an editable admin label), this never changes for a given offer.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/campaignId`.
+                            internal var campaignId: Swift.String
                             /// Creative headline/title for the offer.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/title`.
@@ -4861,6 +5259,10 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/additionalImages`.
                             internal var additionalImages: [Swift.String]?
+                            /// When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/isDemo`.
+                            internal var isDemo: Swift.Bool?
                             /// Display name of the advertiser (organization) behind the offer.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/advertiserName`.
@@ -4884,53 +5286,169 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/badgeLabel`.
                             internal var badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload?
+                            /// Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/heroImageUrl`.
+                            internal var heroImageUrl: Swift.String?
+                            /// https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/termsUrl`.
+                            internal var termsUrl: Swift.String?
+                            /// Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/category`.
+                            internal var category: Swift.String?
+                            /// Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload`.
+                            internal struct instructionsPayloadPayload: Codable, Hashable, Sendable {
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload/title`.
+                                internal var title: Swift.String
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload/subtitle`.
+                                internal var subtitle: Swift.String
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload/ctaButtonText`.
+                                internal var ctaButtonText: Swift.String?
+                                /// Creates a new `instructionsPayloadPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - title:
+                                ///   - subtitle:
+                                ///   - ctaButtonText:
+                                internal init(
+                                    title: Swift.String,
+                                    subtitle: Swift.String,
+                                    ctaButtonText: Swift.String? = nil
+                                ) {
+                                    self.title = title
+                                    self.subtitle = subtitle
+                                    self.ctaButtonText = ctaButtonText
+                                }
+                                internal enum CodingKeys: String, CodingKey {
+                                    case title
+                                    case subtitle
+                                    case ctaButtonText
+                                }
+                            }
+                            /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructions`.
+                            internal typealias instructionsPayload = [Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayloadPayload]
+                            /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructions`.
+                            internal var instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayload?
+                            /// A short one line version of the instructions, e.g. "sign up, complete one survey". Null or absent: the creative has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/quickInstructions`.
+                            internal var quickInstructions: Swift.String?
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal struct rewardConfirmationTimePayload: Codable, Hashable, Sendable {
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/medianSeconds`.
+                                internal var medianSeconds: Swift.Int
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/rewardConfirmationTime/p90Seconds`.
+                                internal var p90Seconds: Swift.Int
+                                /// Creates a new `rewardConfirmationTimePayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - medianSeconds:
+                                ///   - p90Seconds:
+                                internal init(
+                                    medianSeconds: Swift.Int,
+                                    p90Seconds: Swift.Int
+                                ) {
+                                    self.medianSeconds = medianSeconds
+                                    self.p90Seconds = p90Seconds
+                                }
+                                internal enum CodingKeys: String, CodingKey {
+                                    case medianSeconds
+                                    case p90Seconds
+                                }
+                            }
+                            /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
+                            internal var rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload?
                             /// Creates a new `offersPayloadPayload`.
                             ///
                             /// - Parameters:
                             ///   - impressionUid: Per-offer impression id. Pass this to POST /offers/impressions/:impression_uid/delivered when this offer is actually shown to the user to record the impression.
                             ///   - clickUrl: Branded short click URL (https://link.encorekit.com/<slug>) that 302s to the advertiser with attribution. Open it in-app to register the click; also usable as a share-to-friend link.
+                            ///   - campaignId: Stable identifier for the offer (campaign). Use THIS to match a completion back to the offer you displayed: the `offer_completed` webhook carries the same value as its `campaignId`. Unlike `title` (which is per-creative and localized) and `campaignName` (an editable admin label), this never changes for a given offer.
                             ///   - title: Creative headline/title for the offer.
                             ///   - description: Longer creative description, or null when the creative has none.
                             ///   - imageUrl: Primary creative image URL.
                             ///   - additionalImages: Additional creative image URLs (may be empty). Supplements the primary imageUrl.
+                            ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
                             ///   - advertiserName: Display name of the advertiser (organization) behind the offer.
                             ///   - advertiserLogo: Advertiser (organization) logo URL for rendering the brand mark, or null when the advertiser has no logo set.
                             ///   - perk: Campaign value proposition (e.g. "3 months of Apple Music free"), or null when the campaign has none.
                             ///   - badgeLabel: Constrained promo badge for the in-app offer card: "free_trial" | "discount", or null when the campaign has none. Clients map the enum to display text ("Free trial" / "Discount") and free-trial-vs-discount logic.
+                            ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
+                            ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - category: Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
+                            ///   - instructions: Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
+                            ///   - quickInstructions: A short one line version of the instructions, e.g. "sign up, complete one survey". Null or absent: the creative has none.
+                            ///   - rewardConfirmationTime: Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             internal init(
                                 impressionUid: Swift.String,
                                 clickUrl: Swift.String,
+                                campaignId: Swift.String,
                                 title: Swift.String,
                                 description: Swift.String? = nil,
                                 imageUrl: Swift.String,
                                 additionalImages: [Swift.String]? = nil,
+                                isDemo: Swift.Bool? = nil,
                                 advertiserName: Swift.String,
                                 advertiserLogo: Swift.String? = nil,
                                 perk: Swift.String? = nil,
-                                badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil
+                                badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
+                                heroImageUrl: Swift.String? = nil,
+                                termsUrl: Swift.String? = nil,
+                                category: Swift.String? = nil,
+                                instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayload? = nil,
+                                quickInstructions: Swift.String? = nil,
+                                rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil
                             ) {
                                 self.impressionUid = impressionUid
                                 self.clickUrl = clickUrl
+                                self.campaignId = campaignId
                                 self.title = title
                                 self.description = description
                                 self.imageUrl = imageUrl
                                 self.additionalImages = additionalImages
+                                self.isDemo = isDemo
                                 self.advertiserName = advertiserName
                                 self.advertiserLogo = advertiserLogo
                                 self.perk = perk
                                 self.badgeLabel = badgeLabel
+                                self.heroImageUrl = heroImageUrl
+                                self.termsUrl = termsUrl
+                                self.category = category
+                                self.instructions = instructions
+                                self.quickInstructions = quickInstructions
+                                self.rewardConfirmationTime = rewardConfirmationTime
                             }
                             internal enum CodingKeys: String, CodingKey {
                                 case impressionUid
                                 case clickUrl
+                                case campaignId
                                 case title
                                 case description
                                 case imageUrl
                                 case additionalImages
+                                case isDemo
                                 case advertiserName
                                 case advertiserLogo
                                 case perk
                                 case badgeLabel
+                                case heroImageUrl
+                                case termsUrl
+                                case category
+                                case instructions
+                                case quickInstructions
+                                case rewardConfirmationTime
                             }
                         }
                         /// The bandit-ranked eligible offers for the user (up to `limit`), each with its own impressionUid and branded short clickUrl. Empty array when no eligible offer was found.
@@ -5259,7 +5777,7 @@ internal enum Operations {
             }
         }
     }
-    /// Record that a previously selected offer (impression) was actually shown to the end user — confirming an impression. Used by both the messaging surface (/offers/message) and the multi-offer feed (/offers/feed, called once per offer as it is displayed). Emits `offer.delivered`; analytics joins to `offer.requested` by impression_uid downstream. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Confirms an impression: call once per offer as it is displayed, for /offers/feed, /offers/catalog and /offers/message alike; the impression id comes from the serve response or the click url. Emits sdk_offer_presented keyed on the impression id; analytics stitches it to the serve in the warehouse. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/impressions/{impression_uid}/delivered`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/post`.
@@ -5297,19 +5815,19 @@ internal enum Operations {
             internal enum Body: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/requestBody/json`.
                 internal struct jsonPayload: Codable, Hashable, Sendable {
-                    /// Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'.
+                    /// Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'. Milliseconds are also accepted (any value above 1e11 is read as milliseconds), and a value that is not plausibly a real delivery is replaced by the receipt time on the analytics event; the value you send is always preserved verbatim in the event's properties.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/requestBody/json/deliveredTimestamp`.
                     internal var deliveredTimestamp: Swift.Int
-                    /// Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional.
+                    /// Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional. Milliseconds are also accepted, exactly as for `deliveredTimestamp`. Unlike `deliveredTimestamp` there is no receipt-time substitution: a value that is not plausibly a real read is simply reported as null on the analytics event, since nothing depends on it.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/requestBody/json/readTimestamp`.
                     internal var readTimestamp: Swift.Int?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
-                    ///   - deliveredTimestamp: Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'.
-                    ///   - readTimestamp: Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional.
+                    ///   - deliveredTimestamp: Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'. Milliseconds are also accepted (any value above 1e11 is read as milliseconds), and a value that is not plausibly a real delivery is replaced by the receipt time on the analytics event; the value you send is always preserved verbatim in the event's properties.
+                    ///   - readTimestamp: Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional. Milliseconds are also accepted, exactly as for `deliveredTimestamp`. Unlike `deliveredTimestamp` there is no receipt-time substitution: a value that is not plausibly a real read is simply reported as null on the analytics event, since nothing depends on it.
                     internal init(
                         deliveredTimestamp: Swift.Int,
                         readTimestamp: Swift.Int? = nil
@@ -9952,6 +10470,80 @@ internal enum Operations {
                     }
                 }
             }
+            internal struct TooManyRequests: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests.Body
+                /// Creates a new `TooManyRequests`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/errors/post/responses/429`.
+            ///
+            /// HTTP response code: `429 tooManyRequests`.
+            case tooManyRequests(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests)
+            /// The associated value of the enum case if `self` is `.tooManyRequests`.
+            ///
+            /// - Throws: An error if `self` is not `.tooManyRequests`.
+            /// - SeeAlso: `.tooManyRequests`.
+            internal var tooManyRequests: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_errors.Output.TooManyRequests {
+                get throws {
+                    switch self {
+                    case let .tooManyRequests(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "tooManyRequests",
+                            response: self
+                        )
+                    }
+                }
+            }
             internal struct InternalServerError: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/500/content`.
                 internal enum Body: Sendable, Hashable {
@@ -10793,7 +11385,7 @@ internal enum Operations {
             }
         }
     }
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -10823,6 +11415,10 @@ internal enum Operations {
                 ///
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/useCase`.
                 internal var useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query.useCasePayload?
+                /// Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/demoVariant`.
+                internal var demoVariant: Swift.String?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
@@ -10830,16 +11426,19 @@ internal enum Operations {
                 ///   - sdkVersion: SDK version for compatibility filtering
                 ///   - language: Optional language hint (e.g. 'es'). Overrides the Accept-Language header; region subtags are stripped.
                 ///   - useCase: Which Encore surface is being configured. Omit for today's behaviour. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, resolves to template: null — it NEVER falls back to another use case's template.
+                ///   - demoVariant: Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
                 internal init(
                     userId: Swift.String,
                     sdkVersion: Swift.String,
                     language: Swift.String? = nil,
-                    useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query.useCasePayload? = nil
+                    useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query.useCasePayload? = nil,
+                    demoVariant: Swift.String? = nil
                 ) {
                     self.userId = userId
                     self.sdkVersion = sdkVersion
                     self.language = language
                     self.useCase = useCase
+                    self.demoVariant = demoVariant
                 }
             }
             internal var query: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query
@@ -11202,7 +11801,7 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui`.
                         internal var ui: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload
-                        /// NEW, additive. Default variant for every OTHER use case this app is enabled for, so the SDK can cache them at identify(). `ui` is unchanged; un-upgraded decoders ignore this key.
+                        /// Assigned variant for every use case this app is enabled for other than the one REQUESTED, so the SDK can cache them at identify(). When the single-enabled-use-case fallback serves a different surface in `ui`, that surface also appears here under its own key, so a client that files `ui` under the requested use case still finds it. `ui` is unchanged; un-upgraded decoders ignore this key.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases`.
                         internal struct useCasesPayload: Codable, Hashable, Sendable {
@@ -11821,7 +12420,7 @@ internal enum Operations {
                                 case post_hyphen_action_hyphen_reward = "post-action-reward"
                             }
                         }
-                        /// NEW, additive. Default variant for every OTHER use case this app is enabled for, so the SDK can cache them at identify(). `ui` is unchanged; un-upgraded decoders ignore this key.
+                        /// Assigned variant for every use case this app is enabled for other than the one REQUESTED, so the SDK can cache them at identify(). When the single-enabled-use-case fallback serves a different surface in `ui`, that surface also appears here under its own key, so a client that files `ui` under the requested use case still finds it. `ui` is unchanged; un-upgraded decoders ignore this key.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases`.
                         internal var useCases: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload
@@ -12017,7 +12616,7 @@ internal enum Operations {
                         /// - Parameters:
                         ///   - success:
                         ///   - ui: UI configuration: template + values
-                        ///   - useCases: NEW, additive. Default variant for every OTHER use case this app is enabled for, so the SDK can cache them at identify(). `ui` is unchanged; un-upgraded decoders ignore this key.
+                        ///   - useCases: Assigned variant for every use case this app is enabled for other than the one REQUESTED, so the SDK can cache them at identify(). When the single-enabled-use-case fallback serves a different surface in `ui`, that surface also appears here under its own key, so a client that files `ui` under the requested use case still finds it. `ui` is unchanged; un-upgraded decoders ignore this key.
                         ///   - entitlements: Entitlement configuration (IAP or Native mode)
                         ///   - experiments: Experiment configurations
                         ///   - locale: Resolved locale served in this response (language-only, e.g. 'es'). Absent on pre-localization responses.
@@ -12980,6 +13579,600 @@ internal enum Operations {
             }
         }
     }
+    /// Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.
+    ///
+    /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    ///
+    /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/users/attributes`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post`.
+    internal enum post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes {
+        internal static let id: Swift.String = "post/publisher/sdk/v1/users/attributes"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Headers
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json`.
+                internal struct jsonPayload: Codable, Hashable, Sendable {
+                    /// User ID from SDK (anonymous UUID or identified)
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/userId`.
+                    internal var userId: Swift.String
+                    /// Attributes to store against this user. REPLACES any previously stored set.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes`.
+                    internal struct attributesPayload: Codable, Hashable, Sendable {
+                        /// ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/countryCode`.
+                        internal var countryCode: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/language`.
+                        internal var language: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/city`.
+                        internal var city: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/state`.
+                        internal var state: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/region`.
+                        internal var region: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/subscriptionTier`.
+                        internal var subscriptionTier: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/monthsSubscribed`.
+                        internal var monthsSubscribed: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/billingCycle`.
+                        internal var billingCycle: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/lastPaymentAmount`.
+                        internal var lastPaymentAmount: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/lastActiveDate`.
+                        internal var lastActiveDate: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/totalSessions`.
+                        internal var totalSessions: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/custom`.
+                        internal struct customPayload: Codable, Hashable, Sendable {
+                            /// A container of undocumented properties.
+                            internal var additionalProperties: [String: Swift.String]
+                            /// Creates a new `customPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - additionalProperties: A container of undocumented properties.
+                            internal init(additionalProperties: [String: Swift.String] = .init()) {
+                                self.additionalProperties = additionalProperties
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeAdditionalProperties(additionalProperties)
+                            }
+                        }
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/custom`.
+                        internal var custom: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body.jsonPayload.attributesPayload.customPayload?
+                        /// Whole years, as an integer. Accepted from ANY app. If you hold only a RANGE, send its LOWEST end: "13-17" is sent as 13, never 15 or 17. Flooring can never mask a minor and a midpoint can. Offers are STILL SERVED to a user under 18 — sending a real age never switches anyone's offers off. It restricts them to inventory appropriate to their age, ranked by the app-level bandit, with no per-user personalisation. Do not send a date of birth — it is refused. Stored with the time you sent it, so the age we act on is aged forward rather than frozen.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/age`.
+                        internal var age: Swift.Int?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/email`.
+                        internal var email: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/firstName`.
+                        internal var firstName: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/lastName`.
+                        internal var lastName: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/mobile`.
+                        internal var mobile: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/phoneNumber`.
+                        internal var phoneNumber: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/postcode`.
+                        internal var postcode: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/postalCode`.
+                        internal var postalCode: Swift.String?
+                        /// Decimal degrees as string (e.g., "37.7749")
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/latitude`.
+                        internal var latitude: Swift.String?
+                        /// Decimal degrees as string (e.g., "-122.4194")
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/longitude`.
+                        internal var longitude: Swift.String?
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/gender`.
+                        internal var gender: Swift.String?
+                        /// Creates a new `attributesPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - countryCode: ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
+                        ///   - language:
+                        ///   - city:
+                        ///   - state:
+                        ///   - region:
+                        ///   - subscriptionTier:
+                        ///   - monthsSubscribed:
+                        ///   - billingCycle:
+                        ///   - lastPaymentAmount:
+                        ///   - lastActiveDate:
+                        ///   - totalSessions:
+                        ///   - custom:
+                        ///   - age: Whole years, as an integer. Accepted from ANY app. If you hold only a RANGE, send its LOWEST end: "13-17" is sent as 13, never 15 or 17. Flooring can never mask a minor and a midpoint can. Offers are STILL SERVED to a user under 18 — sending a real age never switches anyone's offers off. It restricts them to inventory appropriate to their age, ranked by the app-level bandit, with no per-user personalisation. Do not send a date of birth — it is refused. Stored with the time you sent it, so the age we act on is aged forward rather than frozen.
+                        ///   - email:
+                        ///   - firstName:
+                        ///   - lastName:
+                        ///   - mobile:
+                        ///   - phoneNumber:
+                        ///   - postcode:
+                        ///   - postalCode:
+                        ///   - latitude: Decimal degrees as string (e.g., "37.7749")
+                        ///   - longitude: Decimal degrees as string (e.g., "-122.4194")
+                        ///   - gender:
+                        internal init(
+                            countryCode: Swift.String? = nil,
+                            language: Swift.String? = nil,
+                            city: Swift.String? = nil,
+                            state: Swift.String? = nil,
+                            region: Swift.String? = nil,
+                            subscriptionTier: Swift.String? = nil,
+                            monthsSubscribed: Swift.String? = nil,
+                            billingCycle: Swift.String? = nil,
+                            lastPaymentAmount: Swift.String? = nil,
+                            lastActiveDate: Swift.String? = nil,
+                            totalSessions: Swift.String? = nil,
+                            custom: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body.jsonPayload.attributesPayload.customPayload? = nil,
+                            age: Swift.Int? = nil,
+                            email: Swift.String? = nil,
+                            firstName: Swift.String? = nil,
+                            lastName: Swift.String? = nil,
+                            mobile: Swift.String? = nil,
+                            phoneNumber: Swift.String? = nil,
+                            postcode: Swift.String? = nil,
+                            postalCode: Swift.String? = nil,
+                            latitude: Swift.String? = nil,
+                            longitude: Swift.String? = nil,
+                            gender: Swift.String? = nil
+                        ) {
+                            self.countryCode = countryCode
+                            self.language = language
+                            self.city = city
+                            self.state = state
+                            self.region = region
+                            self.subscriptionTier = subscriptionTier
+                            self.monthsSubscribed = monthsSubscribed
+                            self.billingCycle = billingCycle
+                            self.lastPaymentAmount = lastPaymentAmount
+                            self.lastActiveDate = lastActiveDate
+                            self.totalSessions = totalSessions
+                            self.custom = custom
+                            self.age = age
+                            self.email = email
+                            self.firstName = firstName
+                            self.lastName = lastName
+                            self.mobile = mobile
+                            self.phoneNumber = phoneNumber
+                            self.postcode = postcode
+                            self.postalCode = postalCode
+                            self.latitude = latitude
+                            self.longitude = longitude
+                            self.gender = gender
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case countryCode
+                            case language
+                            case city
+                            case state
+                            case region
+                            case subscriptionTier
+                            case monthsSubscribed
+                            case billingCycle
+                            case lastPaymentAmount
+                            case lastActiveDate
+                            case totalSessions
+                            case custom
+                            case age
+                            case email
+                            case firstName
+                            case lastName
+                            case mobile
+                            case phoneNumber
+                            case postcode
+                            case postalCode
+                            case latitude
+                            case longitude
+                            case gender
+                        }
+                    }
+                    /// Attributes to store against this user. REPLACES any previously stored set.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes`.
+                    internal var attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body.jsonPayload.attributesPayload
+                    /// Creates a new `jsonPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - userId: User ID from SDK (anonymous UUID or identified)
+                    ///   - attributes: Attributes to store against this user. REPLACES any previously stored set.
+                    internal init(
+                        userId: Swift.String,
+                        attributes: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body.jsonPayload.attributesPayload
+                    ) {
+                        self.userId = userId
+                        self.attributes = attributes
+                    }
+                    internal enum CodingKeys: String, CodingKey {
+                        case userId
+                        case attributes
+                    }
+                }
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/content/application\/json`.
+                case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body.jsonPayload)
+            }
+            internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Headers = .init(),
+                body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/success`.
+                        internal var success: Swift.Bool
+                        /// Canonical user UUID
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/userId`.
+                        internal var userId: Swift.String
+                        /// ISO 8601 instant the set was recorded; what a stored age is aged forward from
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/storedAt`.
+                        internal var storedAt: Swift.String
+                        /// True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/minor`.
+                        internal var minor: Swift.Bool
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - success:
+                        ///   - userId: Canonical user UUID
+                        ///   - storedAt: ISO 8601 instant the set was recorded; what a stored age is aged forward from
+                        ///   - minor: True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
+                        internal init(
+                            success: Swift.Bool,
+                            userId: Swift.String,
+                            storedAt: Swift.String,
+                            minor: Swift.Bool
+                        ) {
+                            self.success = success
+                            self.userId = userId
+                            self.storedAt = storedAt
+                            self.minor = minor
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case success
+                            case userId
+                            case storedAt
+                            case minor
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            internal var badRequest: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct Unauthorized: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized.Body
+                /// Creates a new `Unauthorized`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            internal var unauthorized: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct InternalServerError: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError.Body
+                /// Creates a new `InternalServerError`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/attributes/post/responses/500`.
+            ///
+            /// HTTP response code: `500 internalServerError`.
+            case internalServerError(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError)
+            /// The associated value of the enum case if `self` is `.internalServerError`.
+            ///
+            /// - Throws: An error if `self` is not `.internalServerError`.
+            /// - SeeAlso: `.internalServerError`.
+            internal var internalServerError: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users_sol_attributes.Output.InternalServerError {
+                get throws {
+                    switch self {
+                    case let .internalServerError(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "internalServerError",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
     /// Link Apple Account to subscription chain (appTransactionId ↔ originalTransactionId). Idempotent: updates last_observed_at if exists. Used for NCL attribution via webhooks.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/iap-links`.
@@ -13781,7 +14974,7 @@ internal enum Operations {
             }
         }
     }
-    /// Simulate a conversion postback for the Paramount+ Encore Demo campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
+    /// Simulate a conversion postback for the Halcyon Stream campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/test/conversions/complete`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/test/conversions/complete/post`.
@@ -18292,6 +19485,7 @@ internal enum Operations {
                                     case CPA = "CPA"
                                     case CPC = "CPC"
                                     case CPI = "CPI"
+                                    case CPL = "CPL"
                                     case CPM = "CPM"
                                 }
                                 /// Campaign payout model (CPA / CPC / CPI / CPM).

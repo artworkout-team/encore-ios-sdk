@@ -9,8 +9,8 @@ import Foundation
 
 /// Protocol defining the interface for analytics sinks.
 ///
-/// Sinks are adapters that forward analytics events to external services
-/// (PostHog, backend API, console, etc.).
+/// Sinks are adapters that forward analytics events to a destination
+/// (Encore's backend ingest, or the console in mock mode).
 ///
 /// **Sendable:** Required because sinks are dispatched to background threads via `Task.detached`.
 internal protocol AnalyticsSink: Sendable {

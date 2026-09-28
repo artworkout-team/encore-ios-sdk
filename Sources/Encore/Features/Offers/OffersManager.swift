@@ -157,11 +157,13 @@ internal actor OffersCache {
     private func isExpired(_ entry: CacheEntry) -> Bool { ageMs(entry) > Int(Self.cacheTTL * 1000) }
     private func ageMs(_ entry: CacheEntry) -> Int { max(0, Int(Date().timeIntervalSince(entry.timestamp) * 1000)) }
 
-    /// Every creative and logo URL a response would render.
+    /// Every creative, hero and logo URL a response would render.
     static func imageURLs(in response: OfferResponse) -> [URL] {
         Array(Set(
             response.offers.compactMap { offer -> [URL] in
-                [offer.displayPrimaryImageUrl, offer.displayLogoUrl]
+                // The hero coalesces to the creative, so a campaign without one
+                // contributes the same URL twice and the Set collapses it.
+                [offer.displayPrimaryImageUrl, offer.displayHeroImageUrl, offer.displayLogoUrl]
                     .compactMap { $0.flatMap { URL(string: $0) } }
             }.flatMap { $0 }
         ))

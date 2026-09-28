@@ -128,11 +128,9 @@ struct OfferSheetView: View {
                 sduiContext.values["email"] = email
             }
 
-            // Offer impressions are fired per-row by the renderer's ForEach
-            // `.onAppear` via `context.onOfferVisible` — for carousel layouts
-            // all rows mount eagerly (non-lazy hStack); for state-machine
-            // layouts, only rows inside a currently-visible state mount. In
-            // both cases `trackOfferImpression` dedupes on campaignId.
+            // Offer impressions come from the offer row's visibility probe.
+            // A featured offer drawn outside a row falls back to its primary
+            // creative.
             viewModel.startTimeTracking()
         }
         .onDisappear {
@@ -192,7 +190,7 @@ struct OfferSheetView: View {
         .presentationDetents(detentsForCurrentState(loadedConfig))
         .applyCornerRadius(loadedConfig.cornerRadius)
         .presentationDragIndicator(loadedConfig.showDragIndicator == true ? .visible : .hidden)
-        .presentationBackground(Color(UIColor.systemGroupedBackground))
+        .presentationBackground(sduiContext.appearance.background)
         .interactiveDismissDisabled(false)
         .preferredColorScheme(preferredColorScheme)
         // Two distinct in-app Safari presentations — only one wrapper is ever
@@ -231,8 +229,8 @@ struct OfferSheetView: View {
         sduiContext.onAction = { [weak viewModel] action, offer in
             viewModel?.handleSDUIAction(action, offer: offer)
         }
-        sduiContext.onOfferVisible = { [weak viewModel] index in
-            viewModel?.trackOfferImpression(at: index)
+        sduiContext.onOfferVisible = { [weak viewModel] offer, displayIndex, _ in
+            viewModel?.trackSDUIOfferImpression(offer, displayIndex: displayIndex)
         }
     }
 

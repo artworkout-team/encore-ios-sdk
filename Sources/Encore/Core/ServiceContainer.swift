@@ -46,11 +46,6 @@ internal final class ServiceContainer: @unchecked Sendable {
     /// surfaces late verification through `Encore.shared.outcomes`.
     /// Started from `Encore.configure()` (needs the main actor).
     let strictUnlockReconciler: StrictUnlockReconciler
-
-    // MARK: - Tester Tooling (Configuration-Scoped)
-    /// Detects 5-shake gesture and POSTs the device's user IDs so internal
-    /// devs can find themselves in the admin portal without log access.
-    let testerRevealManager: TesterRevealManager
     
     init(configuration: Configuration) {
         self.configuration = configuration
@@ -117,20 +112,17 @@ internal final class ServiceContainer: @unchecked Sendable {
         self.experimentManager = ExperimentManager(repository: experimentRepository)
         
 
-        // IAP Transaction Observer - reconciles Transaction.all with iap_links for NCL
-        // Must run for BOTH cohorts (Control users may purchase organically)
-        let observer = IAPTransactionObserver(outbox: self.outbox)
-        observer.start()
-        self.iapObserver = observer
+        // IAP Transaction Observer - reconciles Transaction.all with iap_links for NCL.
+        // Runs for BOTH cohorts (control users purchase organically) unless the host opted out.
+        if configuration.transactionLinking {
+            let observer = IAPTransactionObserver(outbox: self.outbox)
+            observer.start()
+            self.iapObserver = observer
+        } else {
+            Logger.info(.iap, "Transaction linking disabled by Options — no iap-links will be sent")
+        }
 
         self.strictUnlockReconciler = StrictUnlockReconciler(storage: storage)
-
-        // Tester reveal — best-effort, never blocks startup. Started here so
-        // it picks up shakes from the moment the SDK is configured.
-        let revealClient = TesterRevealClient(client: oltpHttpClient)
-        let revealManager = TesterRevealManager(client: revealClient)
-        revealManager.start()
-        self.testerRevealManager = revealManager
 
         Logger.info("Initialized: \(env)")
     }

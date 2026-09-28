@@ -9,44 +9,106 @@ import SwiftUI
 
 // MARK: - Style Modifier (broken into sub-modifiers for compiler performance)
 
+/// Interpolates whatever changed when the state machine moved.
+///
+/// Applied unconditionally but INERT unless the element declares `stateStyles`,
+/// so no shipped variant gains an animation it did not ask for.
+@available(iOS 17.0, *)
+struct SDUIStateAnimationModifier: ViewModifier {
+    let spec: SDUIAnimationSpec?
+    let state: String
+
+    func body(content: Content) -> some View {
+        if let animation = Self.animation(for: spec) {
+            content.animation(animation, value: state)
+        } else {
+            content
+        }
+    }
+
+    /// Nil means a hard cut, which is what every transition does today.
+    static func animation(for spec: SDUIAnimationSpec?) -> Animation? {
+        guard let spec else { return nil }
+        let duration = spec.resolvedDuration
+        switch spec.curve ?? .easeInOut {
+        case .linear: return .linear(duration: duration)
+        case .easeIn: return .easeIn(duration: duration)
+        case .easeOut: return .easeOut(duration: duration)
+        case .easeInOut: return .easeInOut(duration: duration)
+        // Physics, but the template still sets the pace: `duration` is the
+        // spring's RESPONSE. Floored, because a response of 0 is an infinitely
+        // stiff spring and would turn `duration: 0` into a cut.
+        case .spring:
+            return .spring(response: spec.resolvedSpringResponse, dampingFraction: 0.6)
+        }
+    }
+}
+
 @available(iOS 17.0, *)
 struct SDUIStyleModifier: ViewModifier {
     let style: SDUIStyle?
-    
+
+    /// The state machine's state, read as a VALUE rather than through the
+    /// context reference.
+    ///
+    /// Through the context reference the read is not tracked, so a state
+    /// change rebuilt an identical modifier around an identical environment and
+    /// SwiftUI skipped this body: the element kept the state it mounted with,
+    /// which made every per-state style inert on a mounted sheet.
+    @Environment(\.sduiCurrentState) private var currentState
+
     func body(content: Content) -> some View {
+        // Resolved ONCE. `applied` reads it 31 times, and `resolved(forState:)`
+        // copies a struct with ten heap-backed optionals, so leaving this a
+        // computed property cost 31 copies per style modifier per render pass,
+        // at 27 call sites down a recursive tree — on every template,
+        // including the ones that use none of this.
+        applied(content, active: style?.resolved(forState: currentState))
+            // Keyed on the STATE, not on the resolved values. SwiftUI needs one
+            // stable element whose properties changed, which is the whole
+            // reason this rides a per-state style instead of a `conditional`:
+            // a conditional swaps identity, so there is nothing to interpolate.
+            .modifier(SDUIStateAnimationModifier(
+                spec: style?.animatesStateChange == true ? style?.stateAnimation : nil,
+                state: currentState
+            ))
+    }
+
+    @ViewBuilder
+    private func applied(_ content: Content, active: SDUIStyle?) -> some View {
         content
-            .modifier(SDUIContainerRelativeFrameModifier(config: style?.containerRelativeFrame))
-            .modifier(SDUIRelativeFrameModifier(width: style?.relativeWidth, height: style?.relativeHeight))
-            .modifier(SDUISafeAreaPaddingModifier(config: style?.safeAreaPadding))
-            .modifier(SDUIPaddingModifier(padding: style?.padding))
-            .modifier(SDUIFrameModifier(frame: style?.frame))
-            .modifier(SDUIFixedSizeModifier(fixedSize: style?.fixedSize))
-            .modifier(SDUIClippedModifier(clipped: style?.clipped))
+            .modifier(SDUIContainerRelativeFrameModifier(config: active?.containerRelativeFrame))
+            .modifier(SDUIRelativeFrameModifier(width: active?.relativeWidth, height: active?.relativeHeight))
+            .modifier(SDUISafeAreaPaddingModifier(config: active?.safeAreaPadding))
+            .modifier(SDUIPaddingModifier(padding: active?.padding))
+            .modifier(SDUIFrameModifier(frame: active?.frame))
+            .modifier(SDUIFixedSizeModifier(fixedSize: active?.fixedSize))
+            .modifier(SDUIClippedModifier(clipped: active?.clipped))
             // Fill + corner-radius clip + shadow composed together so the drop
             // shadow is cast by the filled rounded SHAPE (behind the content,
             // outside the clip) and never clipped into a hard rectangle.
             .modifier(SDUISurfaceModifier(
-                backgroundColor: style?.backgroundColor,
-                cornerRadius: style?.cornerRadii == nil ? style?.cornerRadius : nil,
-                cornerRadii: style?.cornerRadii,
-                shadow: style?.shadow
+                backgroundColor: active?.backgroundColor,
+                cornerRadius: active?.cornerRadii == nil ? active?.cornerRadius : nil,
+                cornerRadii: active?.cornerRadii,
+                shadow: active?.shadow
             ))
-            .modifier(SDUIBorderModifier(width: style?.borderWidth, color: style?.borderColor, cornerRadius: style?.cornerRadius))
-            .modifier(SDUIGradientBorderModifier(border: style?.gradientBorder, fallbackCornerRadius: style?.cornerRadius))
-            .modifier(SDUIInnerShadowModifier(innerShadow: style?.innerShadow, cornerRadius: style?.resolvedCornerRadius ?? 0))
-            .modifier(SDUIOpacityModifier(opacity: style?.opacity))
-            .modifier(SDUIClipShapeModifier(clipShape: style?.clipShape))
-            .modifier(SDUISafeAreaModifier(ignoresSafeArea: style?.ignoresSafeArea))
-            .modifier(SDUILayoutPriorityModifier(priority: style?.layoutPriority))
+            .modifier(SDUIBorderModifier(width: active?.borderWidth, color: active?.borderColor, cornerRadius: active?.cornerRadius))
+            .modifier(SDUIGradientBorderModifier(border: active?.gradientBorder, fallbackCornerRadius: active?.cornerRadius))
+            .modifier(SDUIInnerShadowModifier(innerShadow: active?.innerShadow, cornerRadius: active?.resolvedCornerRadius ?? 0))
+            .modifier(SDUIOpacityModifier(opacity: active?.opacity))
+            .modifier(SDUIClipShapeModifier(clipShape: active?.clipShape))
+            .modifier(SDUISafeAreaModifier(ignoresSafeArea: active?.ignoresSafeArea))
+            .modifier(SDUILayoutPriorityModifier(priority: active?.layoutPriority))
             // Transforms applied last — after frame/background/overlay resolve —
             // so scale/rotation/offset move the fully-composed element.
-            .modifier(SDUIScaleModifier(scale: style?.scale))
-            .modifier(SDUIRotationModifier(degrees: style?.rotation))
-            .modifier(SDUIOffsetModifier(offset: style?.offset))
+            .modifier(SDUIScaleModifier(scale: active?.scale))
+            .modifier(SDUIRotationModifier(degrees: active?.rotation))
+            .modifier(SDUIOffsetModifier(offset: active?.offset))
             // Scroll-driven transforms wrap the composed element so they
             // animate the whole card (transform + fill) as it scrolls.
-            .modifier(SDUIScrollTransitionModifier(transition: style?.scrollTransition))
-            .modifier(SDUIScrollFadeModifier(fade: style?.scrollFade))
+            .modifier(SDUIScrollTransitionModifier(transition: active?.scrollTransition))
+            .modifier(SDUIScrollFadeModifier(fade: active?.scrollFade))
     }
 }
 
@@ -684,6 +746,35 @@ extension View {
         }
     }
     
+    /// Content margins for a scroll view. `centersItems` (see
+    /// `SDUIElementRenderer.centersSnappedItems`) swaps the fixed horizontal
+    /// margin for one derived from the viewport and card widths.
+    @ViewBuilder
+    func applyScrollContentMargins(_ margins: SDUIPadding?, axis: Axis.Set, centersItems: Bool, scrollTarget: @escaping () -> Int?) -> some View {
+        if centersItems {
+            self.modifier(SDUICenteredScrollMarginsModifier(
+                fallbackMargin: margins?.edgeInsets.leading ?? 0,
+                alignment: .center,
+                scrollTarget: scrollTarget
+            ))
+        } else {
+            self.applyContentMargins(margins, axis: axis)
+        }
+    }
+
+    @ViewBuilder
+    func applyContentMargins(_ margins: SDUIPadding?, axis: Axis.Set) -> some View {
+        if let margins = margins {
+            if axis == .horizontal {
+                self.contentMargins(.horizontal, margins.edgeInsets.leading, for: .scrollContent)
+            } else {
+                self.contentMargins(.vertical, margins.edgeInsets.top, for: .scrollContent)
+            }
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder
     func applyContentMargin(_ margin: CGFloat?, axis: Axis.Set) -> some View {
         if let margin = margin {
@@ -695,5 +786,74 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+// MARK: - Centered Carousel Margins
+
+/// Laid-out width of the first offer card in a carousel, published by
+/// `renderForEach` so the enclosing scroll view can center snapped cards.
+struct SDUICarouselItemWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
+    }
+}
+
+/// Content margins for a `scrollAlignment: center` scroll view: the horizontal
+/// margin is derived at layout time as `(viewport − card) / 2` from the measured
+/// scroll-view width and the first offer card's width, and re-derived when the
+/// viewport changes width (rotation, split view). The template's margin is the
+/// fallback until both are known.
+@available(iOS 17.0, *)
+struct SDUICenteredScrollMarginsModifier: ViewModifier {
+    /// The template's horizontal margin — the pre-`scrollAlignment` behavior.
+    let fallbackMargin: CGFloat
+    /// The alignment this modifier was selected for, which supplies the anchor.
+    let alignment: SDUIScrollAlignment
+    /// The card the carousel is bound to (`context.focusedIndex`); re-aligned
+    /// after every margin change so an inset shift never leaves a neighbour
+    /// snapped in the middle while the selection stays put.
+    let scrollTarget: () -> Int?
+
+    @State private var viewportWidth: CGFloat = 0
+    @State private var measuredItemWidth: CGFloat = 0
+    /// The viewport width the card was measured under. One measurement per
+    /// viewport width: a card whose width depends on the margin (a relative
+    /// width) would otherwise re-measure after every margin change and ratchet.
+    @State private var measuredAtViewportWidth: CGFloat = -1
+
+    func body(content: Content) -> some View {
+        ScrollViewReader { proxy in
+            content
+                .contentMargins(.horizontal, resolvedMargin, for: .scrollContent)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear
+                            .onAppear { viewportWidth = geometry.size.width }
+                            .onChange(of: geometry.size.width) { _, newWidth in viewportWidth = newWidth }
+                    }
+                )
+                .onPreferenceChange(SDUICarouselItemWidthKey.self) { [$measuredItemWidth, $measuredAtViewportWidth, $viewportWidth] width in
+                    guard width > 0, $measuredAtViewportWidth.wrappedValue != $viewportWidth.wrappedValue else { return }
+                    $measuredItemWidth.wrappedValue = width
+                    $measuredAtViewportWidth.wrappedValue = $viewportWidth.wrappedValue
+                }
+                .onChange(of: resolvedMargin) { _, _ in
+                    guard let target = scrollTarget() else { return }
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { proxy.scrollTo(target, anchor: alignment.unitPoint) }
+                }
+        }
+    }
+
+    private var resolvedMargin: CGFloat {
+        SDUIScrollLayout.horizontalMargin(
+            viewportWidth: viewportWidth,
+            itemWidth: measuredItemWidth,
+            fallback: fallbackMargin
+        )
     }
 }

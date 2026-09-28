@@ -350,7 +350,13 @@ enum SDUIFallbackConfig {
                                                                                                     "multilineAlignment": "leading"
                                                                                                 }
                                                                                             }
-                                                                                        ]
+                                                                                        ],
+                                                                                        "style": {
+                                                                                            "frame": {
+                                                                                                "maxWidth": "infinity",
+                                                                                                "alignment": "leading"
+                                                                                            }
+                                                                                        }
                                                                                     }
                                                                                 },
                                                                                 {

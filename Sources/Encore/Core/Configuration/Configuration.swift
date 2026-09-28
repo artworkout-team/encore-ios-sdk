@@ -24,11 +24,15 @@ internal struct Configuration: Sendable {
     let environmentSource: String
     let logLevel: Encore.LogLevel
     let unlock: UnlockMode
+    /// When false the StoreKit transaction observer is never created: no history scan, no iap-links.
+    /// `app_account_id` still ships on analytics events; it is resolved at init, not by the observer.
+    let transactionLinking: Bool
 
     init(
         apiKey: String,
         logLevel: Encore.LogLevel = .error,
         unlock: UnlockMode = .optimistic,
+        transactionLinking: Bool = true,
         environment: EnvironmentConfiguration? = nil
     ) {
         // App Context
@@ -46,6 +50,7 @@ internal struct Configuration: Sendable {
         }
         self.logLevel = logLevel
         self.unlock = unlock
+        self.transactionLinking = transactionLinking
     }
 }
 
@@ -87,14 +92,13 @@ internal enum EnvironmentConfiguration: CustomStringConvertible, Equatable, Send
     // MARK: - Infrastructure Builders
     
     /// Returns the analytics sinks for this environment.
+    /// Hosted builds send only to Encore's ingest; no third-party analytics leaves the device.
     func analyticsSinks(httpClient: HTTPClientProtocol) -> [AnalyticsSink] {
         switch self {
         case .mock:
             [ConsoleSink()]
-        case .local:
+        case .local, .development, .staging, .production:
             [BackendAnalyticsSink(httpClient: httpClient)]
-        case .development, .staging, .production:
-            [PostHogSink(), BackendAnalyticsSink(httpClient: httpClient)]
         }
     }
     
@@ -104,9 +108,19 @@ internal enum EnvironmentConfiguration: CustomStringConvertible, Equatable, Send
         case .mock:
             []
         case .local:
+            // No fallback: a local failure must not reach the production Sentry
+            // project.
             [BackendErrorProvider(httpClient: httpClient)]
         case .development, .staging, .production:
-            [SentryErrorProvider()]
+            // The backend enriches a report with appId and organizationId from
+            // the API key, which no client-side provider can do, and fans out to
+            // Cloud Logging as well as Sentry. Sentry stays as a fallback for
+            // the one case the backend cannot cover: itself being unreachable.
+            // See docs/architecture/error-reporting.md.
+            [BackendErrorProvider(
+                httpClient: httpClient,
+                fallback: SentryErrorProvider(environment: description, transport: "fallback")
+            )]
         }
     }
     

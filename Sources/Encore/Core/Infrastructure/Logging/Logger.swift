@@ -35,7 +35,7 @@ internal enum Logger {
     /// receives — see `concern(for:)` — so the two vocabularies stay
     /// reconciled without widening the error API.
     internal enum Concern: String, CaseIterable {
-        case core = "Core"                    // default: storage, shake, outbox internals, misc infra
+        case core = "Core"                    // default: storage, outbox internals, misc infra
         case configuration = "Configuration"  // SDK config, remote config, SDUI dev variants
         case network = "Network"              // HTTP transport
         case analytics = "Analytics"          // event emission — 1:1 console mirror of the behavioral funnel

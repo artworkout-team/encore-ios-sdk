@@ -141,6 +141,7 @@
                               "CPA",
                               "CPC",
                               "CPI",
+                              "CPL",
                               "CPM"
                             ]
                           },
@@ -218,6 +219,10 @@
                             "type": "boolean",
                             "description": "When true, this campaign is auto-granted to every newly created app. Independent of priority (which controls ranking order only)."
                           },
+                          "isDemo": {
+                            "type": "boolean",
+                            "description": "When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory."
+                          },
                           "targetingMode": {
                             "type": "string",
                             "enum": [
@@ -249,6 +254,16 @@
                             ],
                             "nullable": true,
                             "description": "Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge."
+                          },
+                          "heroImageUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl."
+                          },
+                          "termsUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
                           },
                           "createdAt": {
                             "type": "string",
@@ -868,13 +883,23 @@
                   "placementId": {
                     "type": "string",
                     "maxLength": 64,
-                    "description": "Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Best-effort analytics context: when supplied it is stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself."
+                    "description": "Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself."
                   },
                   "maxPostbackTimeMs": {
                     "type": "integer",
                     "minimum": 1000,
                     "maximum": 120000,
                     "description": "Strict unlock mode: only include campaigns whose postback latency is less than or equal to this value (in milliseconds). Omit for no filtering. Bounded 1000..120000."
+                  },
+                  "context": {
+                    "type": "object",
+                    "properties": {
+                      "activity": {
+                        "type": "string",
+                        "description": "Request-scoped activity the user is engaged in at serve time (what the surface is being used for, not a persisted user property). Recognized values: laundry, vending, car_wash, air_vacuum, amusement. Any other value is accepted and recorded on serve analytics, so unrecognized activities show up in reporting rather than failing the request. Does not change which offers are served today."
+                      }
+                    },
+                    "description": "Request-scoped serving context. Unknown keys are ignored."
                   }
                 },
                 "required": [
@@ -918,6 +943,7 @@
                               "CPA",
                               "CPC",
                               "CPI",
+                              "CPL",
                               "CPM"
                             ]
                           },
@@ -995,6 +1021,10 @@
                             "type": "boolean",
                             "description": "When true, this campaign is auto-granted to every newly created app. Independent of priority (which controls ranking order only)."
                           },
+                          "isDemo": {
+                            "type": "boolean",
+                            "description": "When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory."
+                          },
                           "targetingMode": {
                             "type": "string",
                             "enum": [
@@ -1026,6 +1056,16 @@
                             ],
                             "nullable": true,
                             "description": "Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge."
+                          },
+                          "heroImageUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl."
+                          },
+                          "termsUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
                           },
                           "createdAt": {
                             "type": "string",
@@ -1419,6 +1459,40 @@
                               ]
                             },
                             "description": "Included if includeCreatives=true"
+                          },
+                          "shareUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Opaque link a user can send to someone else for this campaign. A claim made through it attributes back to the user who shared it. MUST be absolute and http or https: both SDKs drop anything else while parsing, so a scheme-less or relative value reads as absent and no share control is drawn. ABSENT until share links ship, and a client that finds it absent must share nothing rather than falling back to another URL: an unattributed link loses the claim the share exists to carry. /offers/search only. Deliberately a plain string, not `format: uri`: that format makes the Kotlin generator emit java.net.URI, and a link its parser rejects would fail the WHOLE offers decode on Android rather than just the share button."
+                          },
+                          "category": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Display name of the campaign category, e.g. \"Music and Audio\". Free string: the taxonomy is admin-editable, so accept any value."
+                          },
+                          "categoryGroup": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The gift-sheet group this campaign files under: \"Watch & listen\", \"Money\" or \"Everyday\". Derived from `category` by the server so a native chip strip shows what web tabs show without holding the taxonomy map. Always set: an absent, blank or unmapped category files under \"Everyday\", so every offer sits in some group. Whether a strip is worth drawing is the client's call, because only it knows which offers its sheet lists. /offers/search only: web-sdk holds its own copy of the map and groups `category` itself."
+                          },
+                          "rewardConfirmationTime": {
+                            "type": "object",
+                            "properties": {
+                              "medianSeconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "p90Seconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "medianSeconds",
+                              "p90Seconds"
+                            ],
+                            "nullable": true,
+                            "description": "Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then."
                           }
                         },
                         "required": [
@@ -1502,6 +1576,25 @@
               }
             }
           },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "401": {
             "description": "Default Response",
             "content": {
@@ -1568,7 +1661,7 @@
           "publisher-sdk",
           "offers"
         ],
-        "description": "Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped — non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl` — route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries) — not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "description": "Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1591,6 +1684,19 @@
                     "maxLength": 2,
                     "pattern": "^[A-Z]{2}$",
                     "description": "ISO 3166-1 alpha-2 country code of the END USER the offers will be shown to (e.g. \"US\", \"GB\"). Provides the geography signal for geo-filtering. Resolution: this value → client IP (X-Forwarded-For aware) → (rejected if neither resolves). Send it when calling server-to-server without forwarding the end user's IP; omit it when the end user (or a proxy forwarding their IP) is the caller. Ignored when includeAllRegions is true."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "android",
+                      "ios",
+                      "web"
+                    ],
+                    "description": "Optional device family of the END USER the offers will be shown to (enum; any other value is rejected with 400). Analytics dimension only (platform on the serve event); never 'api'."
+                  },
+                  "placementId": {
+                    "type": "string",
+                    "description": "Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. A per-placement offer rule NEVER applies here. `/offers/catalog` returns inventory rather than a served set, so a rule configured for this label does not select or order what comes back. Scope an inventory pull on your own filters, never on a rule."
                   },
                   "includeAllRegions": {
                     "type": "boolean",
@@ -1665,6 +1771,34 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "isDemo": {
+                            "type": "boolean",
+                            "description": "When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory."
+                          },
+                          "termsUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
+                          },
+                          "rewardConfirmationTime": {
+                            "type": "object",
+                            "properties": {
+                              "medianSeconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "p90Seconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "medianSeconds",
+                              "p90Seconds"
+                            ],
+                            "nullable": true,
+                            "description": "Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then."
                           },
                           "organization": {
                             "type": "object",
@@ -1749,6 +1883,35 @@
                                   },
                                   "nullable": true,
                                   "description": "Platforms this creative supports (empty = all platforms)"
+                                },
+                                "instructions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "title": {
+                                        "type": "string"
+                                      },
+                                      "subtitle": {
+                                        "type": "string"
+                                      },
+                                      "ctaButtonText": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "title",
+                                      "subtitle"
+                                    ],
+                                    "description": "Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows."
+                                  },
+                                  "nullable": true,
+                                  "description": "Step by step instructions from the creative, translated like the title. Null or absent: the creative has none."
+                                },
+                                "quickInstructions": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "A short one line version of the instructions, e.g. \"sign up, complete one survey\". Null or absent: the creative has none."
                                 },
                                 "clickUrl": {
                                   "type": "string",
@@ -1887,7 +2050,7 @@
           "publisher-sdk",
           "offers"
         ],
-        "description": "Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields — the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk) — so the integrator composes their own message. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.",
+        "description": "DEPRECATED (2026-08-24): kept serving for existing integrators; new integrations use /offers/feed. Select one eligible offer for a third-party messaging surface (WhatsApp, Messenger, Instagram) and return the raw offer fields, the branded short clickUrl plus context (title, description, imageUrl, advertiserName, perk), so the integrator composes their own message. Calling this endpoint is NOT itself the impression: it emits sdk_offer_requested and returns impressionUid; confirm display via POST /offers/impressions/{impressionUid}/delivered once the message is delivered. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*). Retries are NOT deduplicated server-side (no retry-stable client key on the request), so each call produces a distinct short link and analytics row.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1934,6 +2097,10 @@
                       "language"
                     ],
                     "description": "Targeting attributes — countryCode and language are required; platform is optional (omit for a platform='api' app to receive all offers untrimmed)."
+                  },
+                  "placementId": {
+                    "type": "string",
+                    "description": "Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served."
                   }
                 },
                 "required": [
@@ -1960,6 +2127,11 @@
                         true
                       ]
                     },
+                    "impressionUid": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Handle for the served offer; POST /offers/impressions/{impressionUid}/delivered when the message is confirmed delivered to the user (that call is the impression). Absent when no offer was served."
+                    },
                     "offer": {
                       "type": "object",
                       "properties": {
@@ -1985,6 +2157,10 @@
                         "advertiserName": {
                           "type": "string",
                           "description": "Display name of the advertiser (organization) behind the offer."
+                        },
+                        "isDemo": {
+                          "type": "boolean",
+                          "description": "When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory."
                         },
                         "perk": {
                           "type": "string",
@@ -2087,7 +2263,7 @@
           "publisher-sdk",
           "offers"
         ],
-        "description": "Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression — the server emits one offer.requested per offer as the served baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "description": "Return the bandit-ranked eligible offers for a user (up to `limit`, default 10) so a native / custom-UI app can render them and cycle through them client-side. Each offer carries its own impressionUid plus the branded short clickUrl and context (title, description, imageUrl, additionalImages, advertiserName, advertiserLogo, perk). Calling this endpoint is NOT itself the impression: the server emits one sdk_offer_requested per offer as the requests baseline; confirm an actual impression by calling POST /offers/impressions/:impression_uid/delivered when an offer is shown. Returns offers:[] when no eligible offer was found. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2141,6 +2317,10 @@
                     "maximum": 25,
                     "default": 10,
                     "description": "Maximum number of offers to return (1–25, default 10). The client controls display order and cycles through them one at a time."
+                  },
+                  "placementId": {
+                    "type": "string",
+                    "description": "Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served."
                   }
                 },
                 "required": [
@@ -2181,6 +2361,11 @@
                             "format": "uri",
                             "description": "Branded short click URL (https://link.encorekit.com/<slug>) that 302s to the advertiser with attribution. Open it in-app to register the click; also usable as a share-to-friend link."
                           },
+                          "campaignId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Stable identifier for the offer (campaign). Use THIS to match a completion back to the offer you displayed: the `offer_completed` webhook carries the same value as its `campaignId`. Unlike `title` (which is per-creative and localized) and `campaignName` (an editable admin label), this never changes for a given offer."
+                          },
                           "title": {
                             "type": "string",
                             "description": "Creative headline/title for the offer."
@@ -2203,6 +2388,10 @@
                             },
                             "default": [],
                             "description": "Additional creative image URLs (may be empty). Supplements the primary imageUrl."
+                          },
+                          "isDemo": {
+                            "type": "boolean",
+                            "description": "When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory."
                           },
                           "advertiserName": {
                             "type": "string",
@@ -2227,11 +2416,75 @@
                             ],
                             "nullable": true,
                             "description": "Constrained promo badge for the in-app offer card: \"free_trial\" | \"discount\", or null when the campaign has none. Clients map the enum to display text (\"Free trial\" / \"Discount\") and free-trial-vs-discount logic."
+                          },
+                          "heroImageUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl."
+                          },
+                          "termsUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
+                          },
+                          "category": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Display name of the campaign category, e.g. \"Music and Audio\". Free string: the taxonomy is admin-editable, so accept any value."
+                          },
+                          "instructions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "title": {
+                                  "type": "string"
+                                },
+                                "subtitle": {
+                                  "type": "string"
+                                },
+                                "ctaButtonText": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "title",
+                                "subtitle"
+                              ],
+                              "description": "Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows."
+                            },
+                            "nullable": true,
+                            "description": "Step by step instructions from the creative, translated like the title. Null or absent: the creative has none."
+                          },
+                          "quickInstructions": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "A short one line version of the instructions, e.g. \"sign up, complete one survey\". Null or absent: the creative has none."
+                          },
+                          "rewardConfirmationTime": {
+                            "type": "object",
+                            "properties": {
+                              "medianSeconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "p90Seconds": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "medianSeconds",
+                              "p90Seconds"
+                            ],
+                            "nullable": true,
+                            "description": "Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then."
                           }
                         },
                         "required": [
                           "impressionUid",
                           "clickUrl",
+                          "campaignId",
                           "title",
                           "description",
                           "imageUrl",
@@ -2317,7 +2570,7 @@
           "publisher-sdk",
           "offers"
         ],
-        "description": "Record that a previously selected offer (impression) was actually shown to the end user — confirming an impression. Used by both the messaging surface (/offers/message) and the multi-offer feed (/offers/feed, called once per offer as it is displayed). Emits `offer.delivered`; analytics joins to `offer.requested` by impression_uid downstream. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "description": "Confirms an impression: call once per offer as it is displayed, for /offers/feed, /offers/catalog and /offers/message alike; the impression id comes from the serve response or the click url. Emits sdk_offer_presented keyed on the impression id; analytics stitches it to the serve in the warehouse. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2328,13 +2581,13 @@
                     "type": "integer",
                     "exclusiveMinimum": true,
                     "minimum": 0,
-                    "description": "Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'."
+                    "description": "Unix seconds — Meta webhook `statuses[].timestamp` where status='delivered'. Milliseconds are also accepted (any value above 1e11 is read as milliseconds), and a value that is not plausibly a real delivery is replaced by the receipt time on the analytics event; the value you send is always preserved verbatim in the event's properties."
                   },
                   "readTimestamp": {
                     "type": "integer",
                     "exclusiveMinimum": true,
                     "minimum": 0,
-                    "description": "Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional."
+                    "description": "Unix seconds — Meta webhook `statuses[].timestamp` where status='read'. Optional. Milliseconds are also accepted, exactly as for `deliveredTimestamp`. Unlike `deliveredTimestamp` there is no receipt-time substitution: a value that is not plausibly a real read is simply reported as null on the analytics event, since nothing depends on it."
                   }
                 },
                 "required": [
@@ -4126,6 +4379,25 @@
               }
             }
           },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "500": {
             "description": "Default Response",
             "content": {
@@ -4477,7 +4749,7 @@
           "publisher-sdk",
           "config"
         ],
-        "description": "Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.",
+        "description": "Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.",
         "parameters": [
           {
             "schema": {
@@ -4521,6 +4793,15 @@
             "name": "useCase",
             "required": false,
             "description": "Which Encore surface is being configured. Omit for today's behaviour. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, resolves to template: null — it NEVER falls back to another use case's template."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "demoVariant",
+            "required": false,
+            "description": "Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics."
           }
         ],
         "responses": {
@@ -5030,7 +5311,7 @@
                           ]
                         }
                       },
-                      "description": "NEW, additive. Default variant for every OTHER use case this app is enabled for, so the SDK can cache them at identify(). `ui` is unchanged; un-upgraded decoders ignore this key."
+                      "description": "Assigned variant for every use case this app is enabled for other than the one REQUESTED, so the SDK can cache them at identify(). When the single-enabled-use-case fallback serves a different surface in `ui`, that surface also appears here under its own key, so a client that files `ui` under the requested use case still finds it. `ui` is unchanged; un-upgraded decoders ignore this key."
                     },
                     "entitlements": {
                       "type": "object",
@@ -5410,6 +5691,216 @@
         }
       }
     },
+    "/publisher/sdk/v1/users/attributes": {
+      "post": {
+        "tags": [
+          "publisher-sdk",
+          "users"
+        ],
+        "description": "Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.\n\nPrecedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.\n\nAGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — \"13-17\" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.\n\nGATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "User ID from SDK (anonymous UUID or identified)"
+                  },
+                  "attributes": {
+                    "type": "object",
+                    "properties": {
+                      "countryCode": {
+                        "type": "string",
+                        "minLength": 2,
+                        "maxLength": 2,
+                        "pattern": "^[A-Z]{2}$",
+                        "description": "ISO 3166-1 alpha-2 country code (e.g., \"US\", \"GB\", \"CA\")."
+                      },
+                      "language": {
+                        "type": "string"
+                      },
+                      "city": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string"
+                      },
+                      "subscriptionTier": {
+                        "type": "string"
+                      },
+                      "monthsSubscribed": {
+                        "type": "string"
+                      },
+                      "billingCycle": {
+                        "type": "string"
+                      },
+                      "lastPaymentAmount": {
+                        "type": "string"
+                      },
+                      "lastActiveDate": {
+                        "type": "string"
+                      },
+                      "totalSessions": {
+                        "type": "string"
+                      },
+                      "custom": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "age": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 120,
+                        "description": "Whole years, as an integer. Accepted from ANY app. If you hold only a RANGE, send its LOWEST end: \"13-17\" is sent as 13, never 15 or 17. Flooring can never mask a minor and a midpoint can. Offers are STILL SERVED to a user under 18 — sending a real age never switches anyone's offers off. It restricts them to inventory appropriate to their age, ranked by the app-level bandit, with no per-user personalisation. Do not send a date of birth — it is refused. Stored with the time you sent it, so the age we act on is aged forward rather than frozen."
+                      },
+                      "email": {
+                        "type": "string"
+                      },
+                      "firstName": {
+                        "type": "string"
+                      },
+                      "lastName": {
+                        "type": "string"
+                      },
+                      "mobile": {
+                        "type": "string"
+                      },
+                      "phoneNumber": {
+                        "type": "string"
+                      },
+                      "postcode": {
+                        "type": "string"
+                      },
+                      "postalCode": {
+                        "type": "string"
+                      },
+                      "latitude": {
+                        "type": "string",
+                        "description": "Decimal degrees as string (e.g., \"37.7749\")"
+                      },
+                      "longitude": {
+                        "type": "string",
+                        "description": "Decimal degrees as string (e.g., \"-122.4194\")"
+                      },
+                      "gender": {
+                        "type": "string"
+                      }
+                    },
+                    "description": "Attributes to store against this user. REPLACES any previously stored set."
+                  }
+                },
+                "required": [
+                  "userId",
+                  "attributes"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Canonical user UUID"
+                    },
+                    "storedAt": {
+                      "type": "string",
+                      "description": "ISO 8601 instant the set was recorded; what a stored age is aged forward from"
+                    },
+                    "minor": {
+                      "type": "boolean",
+                      "description": "True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full."
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "userId",
+                    "storedAt",
+                    "minor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {}
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/publisher/sdk/v1/iap-links": {
       "post": {
         "tags": [
@@ -5663,7 +6154,7 @@
           "publisher-sdk",
           "test"
         ],
-        "description": "Simulate a conversion postback for the Paramount+ Encore Demo campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.",
+        "description": "Simulate a conversion postback for the Halcyon Stream campaign. Unauthenticated; hard-scoped to the demo campaign at the service layer.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -7120,6 +7611,7 @@
                                   "CPA",
                                   "CPC",
                                   "CPI",
+                                  "CPL",
                                   "CPM"
                                 ],
                                 "description": "Campaign payout model (CPA / CPC / CPI / CPM)."

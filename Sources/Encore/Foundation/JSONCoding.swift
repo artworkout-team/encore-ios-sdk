@@ -89,9 +89,8 @@ internal enum JSONCoding {
         return encoder
     }()
 
-    /// Snake_case variant of `encoder` for analytics payloads — PostHog
-    /// and the backend ingest both expect snake_case keys per analytics
-    /// convention. Same determinism guarantee as `encoder`.
+    /// Snake_case variant of `encoder` for analytics payloads; the backend
+    /// ingest expects snake_case keys. Same determinism guarantee as `encoder`.
     static let snakeCaseEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase

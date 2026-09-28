@@ -14,25 +14,20 @@ import SwiftUI
 
 /// Semantic color roles for SDUI variants.
 ///
-/// Distinct from `SDUISemanticColor`, which wraps Apple's UIColor semantics
-/// (`.label`, `.secondarySystemFill`, etc.). `SDUIAppearanceColor` represents
-/// **Encore app theme tokens** — colors the host app configures via the
-/// admin portal and serves through `RemoteConfig`. At render time they
-/// resolve against the active `Appearance` (see below).
+/// Encore theme tokens, distinct from Apple semantics in `SDUISemanticColor`.
+/// Filled from the placement's `AppearanceConfig` and the server's accent colours.
 ///
 /// **Add a new token by:**
 /// 1. Adding the case here.
 /// 2. Adding a stored property to `Appearance`.
 /// 3. Adding the case to `Appearance.color(for:)`.
 /// 4. Providing a default in `Appearance.default`.
-/// 5. Wiring the source field in `Appearance.init(from:)` when/if the
-///    backend `UIValues` schema grows to include it.
+/// 5. Wiring its source (`AppearanceConfig` or `UIValues`) in `Appearance.init(from:overrides:)`.
 ///
 /// Renaming a case is a breaking change for every shipped variant JSON that
 /// references it — treat this enum as a stable public contract.
 enum SDUIAppearanceColor: String, Decodable {
-    /// The app's primary brand color. Use for primary CTAs, selected states,
-    /// and brand highlights. Sourced from `RemoteConfig.accentColor`.
+    /// Primary brand colour for CTAs and selected states: placement `accentColor`, else the server accent.
     case accent
 
     /// Foreground color (text, icons) that sits on top of `.accent`.
@@ -70,14 +65,13 @@ enum SDUIAppearanceColor: String, Decodable {
 
 // MARK: - Appearance
 
-/// Resolved theme for the current app session. One immutable instance per
-/// presentation. Built from the backend's `UIValues` when the SDUI context
-/// time, with per-token fallbacks so partially-configured apps (or no remote
-/// config at all) still render correctly.
+/// Resolved once per presentation in `SDUIContext` (placement overrides, server accents, defaults)
+/// and injected via `\.sduiAppearance` for `ViewModifier`s.
 ///
-/// Injected into the SwiftUI environment via `\.sduiAppearance` so any
-/// `ViewModifier` can resolve `SDUIColor.appearance(_)` without explicit
-/// plumbing.
+/// A reference type with identity equality: SwiftUI can then skip dependent
+/// modifiers when the same presentation's appearance is re-injected, instead
+/// of invalidating every `sduiAppearance` reader on each render (an iOS 17
+/// layout-loop trigger).
 final class Appearance: Equatable {
     let accent: Color
     let onAccent: Color
@@ -89,6 +83,8 @@ final class Appearance: Equatable {
     let border: Color
     let muted: Color
     let error: Color
+    /// True when a publisher background is set, so system colours resolve onto tokens.
+    let themesSemantics: Bool
 
     static func == (lhs: Appearance, rhs: Appearance) -> Bool {
         lhs === rhs
@@ -130,29 +126,49 @@ final class Appearance: Equatable {
         error:        Color(UIColor.systemRed)
     )
 
-    /// Builds an `Appearance` from the backend's `UIValues`, falling back to
-    /// `.default` for any token the payload has not filled in. This is the
-    /// single chokepoint where token → remote field mapping is defined —
-    /// when the backend grows new fields (`primaryColor`, `surfaceColor`,
-    /// etc.), only this initializer needs to learn about them.
-    ///
-    /// Backwards compat note: today `UIValues` only carries `accentColor` +
-    /// `accentTitleColor`. Every other token resolves to its default. Apps
-    /// that have configured `accentColor` immediately get brand-aware
-    /// theming on `.accent` (and the future `.onAccent` contrast default)
-    /// with zero backend migration.
-    init(from uiValues: UIValues?) {
+    /// Builds the session appearance: placement overrides, then server accents, then defaults.
+    init(from uiValues: UIValues?, overrides: AppearanceConfig? = nil) {
         let fallback = Appearance.default
-        self.accent = uiValues?.accentColor.flatMap { Color(hex: $0) } ?? fallback.accent
+        let serverAccent = uiValues?.accentColor.flatMap { Color(hex: $0) }
+        let accentOverride = AppearanceHex.parseField(overrides?.accentColor, name: "accentColor")?.color
+        self.accent = accentOverride ?? serverAccent ?? fallback.accent
         self.onAccent = fallback.onAccent
         self.accentTitle = uiValues?.accentTitleColor.flatMap { Color(hex: $0) } ?? fallback.accentTitle
-        self.background = fallback.background
-        self.onBackground = fallback.onBackground
-        self.surface = fallback.surface
-        self.onSurface = fallback.onSurface
-        self.border = fallback.border
-        self.muted = fallback.muted
         self.error = fallback.error
+
+        // Web derives surface/border/muted from background + text (web-sdk styles.ts).
+        guard let background = AppearanceHex.parseField(overrides?.backgroundColor, name: "backgroundColor") else {
+            self.background = fallback.background
+            self.onBackground = fallback.onBackground
+            self.surface = fallback.surface
+            self.onSurface = fallback.onSurface
+            self.border = fallback.border
+            self.muted = fallback.muted
+            self.themesSemantics = false
+            return
+        }
+        let text = AppearanceHex.parseField(overrides?.textColor, name: "textColor") ?? background.contrastingInk
+        let backgroundColor = background.color
+        let textColor = text.color
+        self.background = backgroundColor
+        self.onBackground = textColor
+        self.onSurface = textColor
+        self.muted = textColor.opacity(0.6)
+        self.surface = backgroundColor.sduiMixed(with: textColor, amount: 0.05)
+        self.border = backgroundColor.sduiMixed(with: textColor, amount: 0.10)
+        self.themesSemantics = true
+    }
+
+    /// Apple semantic colour, mapped onto a token when `themesSemantics` is on.
+    func semanticColor(_ semantic: SDUISemanticColor) -> Color {
+        guard themesSemantics else { return semantic.color }
+        switch semantic {
+        case .systemGroupedBackground: return background
+        case .systemBackground, .secondarySystemBackground, .secondarySystemGroupedBackground: return surface
+        case .label: return onBackground
+        case .secondaryLabel, .tertiaryLabel: return muted
+        case .separator, .tertiarySystemFill: return border
+        }
     }
 
     /// Explicit memberwise initializer used by `.default` and tests.
@@ -178,6 +194,7 @@ final class Appearance: Equatable {
         self.border = border
         self.muted = muted
         self.error = error
+        self.themesSemantics = false
     }
 }
 
@@ -247,5 +264,62 @@ extension EnvironmentValues {
     var sduiCarouselViewportWidth: CGFloat? {
         get { self[SDUICarouselViewportWidthKey.self] }
         set { self[SDUICarouselViewportWidthKey.self] = newValue }
+    }
+}
+
+/// Whether the enclosing scroll view centers its snapped cards
+/// (`scrollAlignment: center`) and so needs the first offer card's laid-out
+/// width. Set by `renderScrollView` on the carousel content; `renderForEach`
+/// only attaches the measuring `GeometryReader` when it is true, so legacy
+/// templates do no extra layout work.
+@available(iOS 17.0, *)
+private struct SDUIMeasuresCarouselItemWidthKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+@available(iOS 17.0, *)
+extension EnvironmentValues {
+    var sduiMeasuresCarouselItemWidth: Bool {
+        get { self[SDUIMeasuresCarouselItemWidthKey.self] }
+        set { self[SDUIMeasuresCarouselItemWidthKey.self] = newValue }
+    }
+}
+
+/// Whether an enclosing offer row OWNS the impression decision for this offer.
+///
+/// True for every offer row, including a silenced one. A creative inside a row
+/// always stands down: inside a probing row it would double-report, and inside
+/// a silenced row it would report what the variant asked to suppress.
+@available(iOS 17.0, *)
+private struct SDUIInsideOfferRowKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+@available(iOS 17.0, *)
+extension EnvironmentValues {
+    var sduiInsideOfferRow: Bool {
+        get { self[SDUIInsideOfferRowKey.self] }
+        set { self[SDUIInsideOfferRowKey.self] = newValue }
+    }
+}
+
+/// The state machine's current state, as a plain VALUE.
+///
+/// The context is carried by reference, and SwiftUI does
+/// not track a read through it: on a state change the renderer rebuilds an
+/// identical `SDUIStyleModifier` around an identical environment value, so the
+/// modifier body is skipped and keeps the state it mounted with. A per-state
+/// style then never moved on a mounted sheet, which is the only place it is
+/// ever used.
+@available(iOS 17.0, *)
+private struct SDUICurrentStateKey: EnvironmentKey {
+    static let defaultValue: String = ""
+}
+
+@available(iOS 17.0, *)
+extension EnvironmentValues {
+    var sduiCurrentState: String {
+        get { self[SDUICurrentStateKey.self] }
+        set { self[SDUICurrentStateKey.self] = newValue }
     }
 }

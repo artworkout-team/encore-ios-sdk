@@ -7,6 +7,7 @@ import Foundation
 import Combine
 import UIKit
 import SwiftUI
+import SafariServices
 
 /// Inputs captured at email-submission time and held until IAP confirms
 /// success. Stashing the fully-built payload (not loose context strings)
@@ -79,6 +80,17 @@ class OfferSheetViewModel: ObservableObject {
     let completionHandler: SheetDismissHandler
     
     private var impressionIds: [String: String] = [:]
+
+    /// The display position each campaign was PRESENTED at, kept for the life
+    /// of the sheet.
+    ///
+    /// `sdk_offer_presented` is first-write-wins, so an offer's position in a
+    /// presentation is the first one it was seen at. A promote moves the live
+    /// index afterwards, and every later event about that offer has to keep
+    /// naming the position the impression was billed at, or the numerator and
+    /// the denominator of a position rate describe different slots and the
+    /// documented `(presentation_id, offer_index)` join stops matching.
+    private var presentedIndex: [String: Int] = [:]
     private var pendingOffer: Offer?
     private var verificationPoller: VerificationPoller?
     private var pendingTransactionId: String?
@@ -103,6 +115,10 @@ class OfferSheetViewModel: ObservableObject {
     /// continuously-changing `DismissAction` on iOS 17, which can trap the
     /// presentation in a root-view invalidation loop.
     private var onDismiss: (() -> Void)?
+
+    /// True from the share tap until the chooser closes. Without it a double
+    /// tap presents twice and, with `onSuccessState: close`, dismisses twice.
+    private var shareInFlight = false
 
     /// Lead payload stashed on submit; fires to the outbox only after IAP
     /// succeeds via `flushPendingLead`.
@@ -192,7 +208,16 @@ class OfferSheetViewModel: ObservableObject {
     private var offerViewCounts: [String: Int] = [:]  // campaignId -> number of times viewed
     
     // Convenience accessor for offers
-    private var offers: [Offer] { offerResponse.offerList }
+    /// The DISPLAY-ordered list, which is what every index in this file means.
+    ///
+    /// `currentOfferIndex` is fed from `sduiContext.currentIndex` by the bridge
+    /// in `OfferSheetView`, so indexing the backend list names a different
+    /// campaign after `offerDisplayOrder` or a `promoteOffer`. Falls back while
+    /// the renderer has not initialised, when backend order is all there is.
+    private var offers: [Offer] {
+        let displayed = sduiContext?.offers ?? []
+        return displayed.isEmpty ? offerResponse.offerList : displayed
+    }
     
     // MARK: - Initialization
     
@@ -630,14 +655,145 @@ class OfferSheetViewModel: ObservableObject {
                 handleOfferTap(offer)
             }
         case .openUrl:
-            break
-        case .setState, .setValue, .selectOffer:
+            openOfferLink(action: action, offer: offer)
+        case .share:
+            if let offer {
+                handleShare(offer, onSuccessState: action.onSuccessState)
+            }
+        case .setState, .setValue, .selectOffer, .setOfferIndex:
             // Handled internally by the renderer; should never reach here.
             break
         case .triggerIAP:
             handleTriggerIAP(action: action)
         case .submitLead:
             handleSubmitLead(action: action)
+        }
+    }
+
+    // MARK: - Share
+
+    /// Presents the system share sheet for `offer`. The link is minted by the
+    /// backend rather than composed here, because the claim URL is bound to the
+    /// sharer's own transaction and cannot be reused.
+    private func handleShare(_ offer: Offer, onSuccessState: String?) {
+        guard !shareInFlight else { return }
+        shareInFlight = true
+
+        let ctx = context(for: offer)
+        track(OfferShareTappedEvent(ctx))
+
+        Task { [weak self] in
+            guard let self else { return }
+            guard let url = await self.shareURL(for: offer) else {
+                // Every tap gets a terminal event, the same rule the claim path
+                // follows, or the funnel cannot tell "no link" from "cancelled".
+                self.shareInFlight = false
+                self.track(OfferShareFailedEvent(ctx, reason: .missingShareLink))
+                Logger.warn("🔗 [Share] No shareable link available for \(offer.id)")
+                return
+            }
+            self.presentShareSheet(url: url, ctx: ctx, onSuccessState: onSuccessState)
+        }
+    }
+
+    /// The link the backend minted for this offer, or nil when it minted none.
+    ///
+    /// Server-supplied rather than composed here, so the attribution it carries
+    /// is the backend's to decide and change without an SDK release. No
+    /// fallback to `displayDestinationUrl`: an unattributed link loses the
+    /// claim, silently.
+    private func shareURL(for offer: Offer) async -> URL? {
+        offer.shareUrl.flatMap(URL.init(string:))
+    }
+
+    /// Takes the context captured at TAP time rather than rebuilding it. The
+    /// presentation happens after a suspension, and `context(for:)` falls back
+    /// to the live `currentOfferIndex`, so a scroll in between would attribute
+    /// a tap and its terminal event to different positions.
+    private func presentShareSheet(url: URL, ctx: OfferAnalyticsContext, onSuccessState: String?) {
+        // Encore's OWN overlay window, with no fallback. `topViewController()`
+        // starts at the scene's first window, which is the host app's, and that
+        // sits below our window level, so the chooser would render underneath
+        // the sheet — present nothing rather than present it invisibly.
+        guard let root = PresentationWindow.window?.rootViewController else {
+            shareInFlight = false
+            track(OfferShareFailedEvent(ctx, reason: .noPresenter))
+            Logger.warn("🔗 [Share] No presenter available")
+            return
+        }
+        let presenter = PresentationWindow.topViewController(from: root)
+
+        let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+
+        // iPad presents this as a popover and traps without an anchor.
+        if let popover = controller.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(
+                x: presenter.view.bounds.midX,
+                y: presenter.view.bounds.midY,
+                width: 0,
+                height: 0
+            )
+            popover.permittedArrowDirections = []
+        }
+
+        controller.completionWithItemsHandler = { [weak self] activityType, completed, _, _ in
+            guard let self else { return }
+            self.shareInFlight = false
+            self.track(OfferShareCompletedEvent(
+                ctx,
+                destination: activityType?.rawValue,
+                completed: completed
+            ))
+            guard completed, let sduiContext = self.sduiContext else { return }
+            self.applyTransition(onSuccessState, on: sduiContext, logPrefix: "🔗 [Share]")
+        }
+
+        presenter.present(controller, animated: true)
+    }
+
+    // MARK: - Open URL
+
+    /// Opens one of the acting offer's own links in an in-app browser.
+    ///
+    /// Not the claim path's Safari sheet: that one grants and transitions on
+    /// dismiss, so a terms tap routed through it would credit a claim the user
+    /// never made. This presents on Encore's own window, like the share chooser,
+    /// and the sheet is still there when the browser closes.
+    private func openOfferLink(action: SDUIAction, offer: Offer?) {
+        guard let attribute = action.urlAttribute else {
+            Logger.warn("🔗 [OpenUrl] No urlAttribute on the action")
+            return
+        }
+        // The scheme rule lives at the Campaign boundary, so the gate a variant
+        // wrote and this tap read one field rather than two.
+        let target = offer ?? sduiContext?.currentOffer
+        guard let raw = Self.offerLink(attribute, on: target), let url = URL(string: raw) else {
+            Logger.warn("🔗 [OpenUrl] No link for \(attribute.rawValue)")
+            return
+        }
+        guard let root = PresentationWindow.window?.rootViewController else {
+            Logger.warn("🔗 [OpenUrl] No presenter available")
+            return
+        }
+        let presenter = PresentationWindow.topViewController(from: root)
+        let browser = SFSafariViewController(url: url)
+        browser.modalPresentationStyle = .pageSheet
+        presenter.present(browser, animated: true)
+    }
+
+    /// The offer's own value for one link attribute, nil when it carries none.
+    ///
+    /// Static and internal so a test can drive it: the presentation half needs a
+    /// device, and the half that picks the URL is where a wrong answer sends a
+    /// user to the wrong page.
+    static func offerLink(_ attribute: SDUIOfferAttribute, on offer: Offer?) -> String? {
+        guard let target = offer else { return nil }
+        switch attribute {
+        case .termsUrl: return target.termsUrl
+        case .shareUrl: return target.shareUrl
+        case .badgeLabel, .perk, .advertiserName, .description, .category, .quickInstructions:
+            return nil
         }
     }
 
@@ -852,7 +1008,8 @@ extension OfferSheetViewModel {
         OfferAnalyticsContext(
             offer: offer,
             impressionId: impressionIds[offer.id] ?? "",
-            offerIndex: index ?? currentOfferIndex ?? 0,
+            // The PRESENTED position wins over the live one. See `presentedIndex`.
+            offerIndex: presentedIndex[offer.id] ?? index ?? currentOfferIndex ?? 0,
             totalOffers: offers.count,
             presentationId: presentationId,
             variantId: variantId,
@@ -909,10 +1066,21 @@ extension OfferSheetViewModel {
     
     // MARK: - Impression Tracking
     
+    /// The offer arrives by identity, not by index: this view model holds the
+    /// BACKEND-ordered list while the tree renders the DISPLAY-ordered one, so
+    /// under `offerDisplayOrder` an index alone names the wrong campaign.
+    func trackSDUIOfferImpression(_ offer: Offer, displayIndex: Int) {
+        recordImpression(offer, index: displayIndex)
+    }
+
     func trackOfferImpression(at index: Int) {
         guard index < offers.count else { return }
+        recordImpression(offers[index], index: index)
+    }
 
-        let offer = offers[index]
+    /// Emits at most one `sdk_offer_presented` per campaign per presentation:
+    /// the ledger is instance state and the sheet builds a view model per show.
+    private func recordImpression(_ offer: Offer, index: Int) {
         let campaignId = offer.id
 
         // Dedupe by campaignId: SwiftUI re-mounts rows on scroll-recycle, so
@@ -921,6 +1089,7 @@ extension OfferSheetViewModel {
         if impressionIds[campaignId] != nil { return }
 
         impressionIds[campaignId] = UUID().uuidString
+        presentedIndex[campaignId] = index
 
         let ctx = context(for: offer, at: index)
         // "scroll" reads honestly for both axes — vertical lists scroll
@@ -1008,7 +1177,10 @@ extension OfferSheetViewModel {
             if let timeSpent = offerViewTimes[offer.id] {
                 track(OfferTimeSpentEvent(
                     offer: offer,
-                    index: index,
+                    // The presented position, for the same reason every other
+                    // per-offer event uses it. This is the event the corpus
+                    // joins to `presented` on `(presentation_id, offer_index)`.
+                    index: presentedIndex[offer.id] ?? index,
                     timeSpent: timeSpent,
                     viewCount: offerViewCounts[offer.id] ?? 0,
                     totalOffers: offers.count,

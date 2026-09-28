@@ -31,7 +31,47 @@ internal struct SentryErrorProvider: ErrorProvider {
     private let session: URLSession
     
     // Cached Device Info (immutable after init)
+
+    /// Sentry's own `platform` field, which tells Sentry how to render a
+    /// stack trace. NOT the same thing as `sdk_platform` below: a web error
+    /// routed through the backend arrives here as `node`, because that is the
+    /// SDK that sent it, while the Encore SDK it came from is `web`.
     private let platform: String = "cocoa"
+
+    /// Which Encore SDK produced the error, tagged for the fleet-wide query.
+    /// Deliberately NOT called `platform`: that name already means something
+    /// else to Sentry, and the two values genuinely differ. Named for the
+    /// `sdk_version` family instead.
+    ///
+    /// `osName` is derived from the same condition rather than hardcoded, so a
+    /// non-UIKit build cannot report `sdk_platform: macos` while its OS context
+    /// still claims iOS. That pairing would be wrong in Sentry's device panel
+    /// and in any filter built on it.
+    #if canImport(UIKit)
+    private let sdkPlatform: String = "ios"
+    private let osName: String = "iOS"
+    #else
+    private let sdkPlatform: String = "macos"
+    private let osName: String = "macOS"
+    #endif
+
+    /// Sentry's environment, so `environment:production` does not silently
+    /// exclude every iOS event. Passed in from `EnvironmentConfiguration`,
+    /// which is the only thing that knows it.
+    private let environment: String
+
+    /// How the report reached Sentry, tagged `report_transport`.
+    ///
+    /// This provider is now reached only when a POST to `/errors` fails, so
+    /// `report_transport:fallback` is a POSITIVE signal that our own API was
+    /// unreachable from a real device. That is worth alerting on, and it is
+    /// much better than the alternative it replaces: inferring an outage from
+    /// Android and web going quiet, which is indistinguishable from a slow
+    /// night.
+    ///
+    /// Defaults to `direct` so the value stays true if anything ever wires
+    /// this provider as a primary again.
+    private let transport: String
     private let appBundleId: String
     private let appVersion: String?
     private let osVersion: String
@@ -39,7 +79,10 @@ internal struct SentryErrorProvider: ErrorProvider {
     
     // MARK: - Initialization
     
-    init() {
+    init(environment: String, transport: String = "direct") {
+        self.environment = environment
+        self.transport = transport
+
         let parsed = Self.parseDSN(Self.dsn)!
         self.storeURL = parsed.storeURL
         self.publicKey = parsed.publicKey
@@ -97,7 +140,9 @@ internal struct SentryErrorProvider: ErrorProvider {
     
     // MARK: - Payload Construction
     
-    private func buildPayload(
+    /// `internal` rather than `private` so `SentryPayloadTests` can pin the
+    /// wire shape. Nothing else calls it.
+    internal func buildPayload(
         error: EncoreError,
         underlying: Error?,
         context: ErrorContext,
@@ -112,6 +157,7 @@ internal struct SentryErrorProvider: ErrorProvider {
             "event_id": eventId,
             "timestamp": timestamp,
             "platform": platform,
+            "environment": environment,
             "level": sentryLevel(for: error),
             "logger": "encore-swift-sdk",
             "message": [
@@ -125,7 +171,9 @@ internal struct SentryErrorProvider: ErrorProvider {
             "tags": [
                 "error_type": error.typeIdentifier,
                 "context": context.rawValue,
-                "sdk_version": sdkVersion
+                "sdk_version": sdkVersion,
+                "sdk_platform": sdkPlatform,
+                "report_transport": transport
             ],
             
             "contexts": [
@@ -134,7 +182,7 @@ internal struct SentryErrorProvider: ErrorProvider {
                     "family": deviceModel
                 ],
                 "os": [
-                    "name": "iOS",
+                    "name": osName,
                     "version": osVersion
                 ],
                 "app": [
@@ -155,12 +203,31 @@ internal struct SentryErrorProvider: ErrorProvider {
             ]
         ]
         
-        // Add exception interface if we have underlying error
+        // Always attach an exception interface.
+        //
+        // Without one, Sentry has no type and no value to render, so the issue
+        // page reads "(No error message)" with no culprit line and no stack
+        // section. This used to happen whenever there was no underlying error,
+        // which is half the issues in the production project.
+        //
+        // Grouping is unaffected either way, because the fingerprint above is
+        // explicit and overrides Sentry's exception-based grouping.
         if let underlying = underlying {
+            // Prefer the underlying type: "NSURLError" says more about a
+            // timeout than "network_error" does, and the fingerprint already
+            // carries the shared value.
             payload["exception"] = [
                 "values": [[
                     "type": String(describing: type(of: underlying)),
                     "value": underlying.localizedDescription,
+                    "module": "EncoreSDK"
+                ]]
+            ]
+        } else {
+            payload["exception"] = [
+                "values": [[
+                    "type": error.typeIdentifier,
+                    "value": error.errorDescription ?? "Unknown error",
                     "module": "EncoreSDK"
                 ]]
             ]

@@ -21,8 +21,15 @@ struct FallbackOfferSheetView: View {
 
     @State private var trackedOfferIndex: Int?
     
-    private var accentColor: Color {
-        if let hex = viewModel.offerContext.accentColor {
+    private var accentColor: Color { Self.accent(for: viewModel.offerContext) }
+
+    /// Placement accent > server accent > fallback blue. Only the accent applies here:
+    /// this view's subviews hard-code their own text colours.
+    static func accent(for context: OfferContext) -> Color {
+        if let override = context.appearance?.accentColor.flatMap(AppearanceHex.parse) {
+            return override.color
+        }
+        if let hex = context.accentColor {
             return Color(hex: hex)
         }
         return OfferSheetStyles.accentBlue
@@ -126,66 +133,67 @@ struct SheetHeaderView: View {
                 .padding(.top, 2)
             }
             
-            HeaderCopyView(offerContext: offerContext)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, OfferSheetStyles.horizontalPadding)
-                .padding(.top, 8)
-        }
-    }
-}
+            // Title and Subtitle
+            VStack(alignment: .leading, spacing: 8) {
+                copy.headline.reduce(Text("")) { text, run in
+                    text + Text(run.text)
+                        .foregroundColor(run.isHighlighted ? accentTitleColor : OfferSheetStyles.primaryText)
+                }
+                .font(OfferSheetStyles.titleFont)
+                .fixedSize(horizontal: false, vertical: true)
 
-@available(iOS 17.0, *)
-private struct HeaderCopyView: View {
-    let offerContext: OfferContext
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            switch offerContext.useCase {
-            case .rewardUsers:
-                rewardHeadline
-                    .font(OfferSheetStyles.titleFont)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(offerContext.rewardSubheadlineText ?? "Choose an offer below to claim it")
-                    .font(OfferSheetStyles.subtitleFont)
-                    .foregroundColor(OfferSheetStyles.secondaryText)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .reduceChurn:
-                (Text(offerContext.titleText ?? "Get 1 month")
-                    .foregroundColor(OfferSheetStyles.primaryText) +
-                 Text(accentTitleTextWithSpace)
-                    .foregroundColor(accentTitleColor))
-                    .font(OfferSheetStyles.titleFont)
-                    .fixedSize(horizontal: false, vertical: true)
-                
-                Text(offerContext.subtitleText ?? "Claim an exclusive offer and get free access to all features")
-                    .font(OfferSheetStyles.subtitleFont)
-                    .foregroundColor(OfferSheetStyles.secondaryText)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let subheadline = copy.subheadline {
+                    Text(subheadline)
+                        .font(OfferSheetStyles.subtitleFont)
+                        .foregroundColor(OfferSheetStyles.secondaryText)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, OfferSheetStyles.horizontalPadding)
+            .padding(.top, 8)
         }
     }
-    
-    private var accentTitleTextWithSpace: String {
-        let text = offerContext.accentTitleText ?? " for free"
-        if text.isEmpty { return text }
-        return text.hasPrefix(" ") ? text : " " + text
-    }
-    
+
+    private var copy: SheetHeaderCopy { SheetHeaderCopy(offerContext: offerContext) }
+
     private var accentTitleColor: Color {
         if let colorHex = offerContext.accentTitleColor {
             return Color(hex: colorHex)
         }
         return Color(hex: "#16BD25")
     }
+}
 
-    private var rewardHeadline: Text {
-        let headline = offerContext.rewardHeadlineText ?? "You've earned a reward"
-        return SDUIInlineMarkup.parse(headline).reduce(Text("")) { text, run in
-            text + Text(run.text)
-                .foregroundColor(run.isHighlighted ? accentTitleColor : OfferSheetStyles.primaryText)
+// MARK: - Sheet Header Copy
+
+/// The fallback header's copy decision, resolved without a renderer so the
+/// use-case branch is testable the way `SDUIInlineMarkup` is.
+struct SheetHeaderCopy: Equatable {
+    /// Highlighted runs carry the accent color. Churn splits its accent into a
+    /// separate field; reward carries it inline as `*marked*`, because reward
+    /// copy reaches the SDK as one substituted string.
+    let headline: [SDUIInlineMarkup.Run]
+    /// `nil` renders nothing. Absent reward subcopy is a real state: the
+    /// template branches on it, so no default is invented here.
+    let subheadline: String?
+
+    init(offerContext: OfferContext) {
+        switch offerContext.useCase {
+        case .reduceChurn:
+            var accent = offerContext.accentTitleText ?? " for free"
+            if !accent.isEmpty, !accent.hasPrefix(" ") { accent = " " + accent }
+            headline = [
+                SDUIInlineMarkup.Run(text: offerContext.titleText ?? "Get 1 month", isHighlighted: false),
+                SDUIInlineMarkup.Run(text: accent, isHighlighted: true),
+            ]
+            subheadline = offerContext.subtitleText
+                ?? "Claim an exclusive offer and get free access to all features"
+        case .rewardUsers:
+            headline = SDUIInlineMarkup.parse(offerContext.headlineText ?? "")
+            let sub = offerContext.subheadlineText
+            subheadline = (sub?.isEmpty ?? true) ? nil : sub
         }
     }
 }

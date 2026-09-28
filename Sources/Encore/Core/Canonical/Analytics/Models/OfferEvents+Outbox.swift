@@ -62,6 +62,7 @@ extension OutboxJob {
         placementId: String?,
         presentationId: String,
         useCase: UseCase,
+        presentationTarget: String,
         variantId: String?,
         unlockMode: UnlockMode,
         distinctId: String
@@ -70,6 +71,9 @@ extension OutboxJob {
             "presentation_id": presentationId,
             "use_case": useCase.rawValue,
             "unlock_mode": unlockMode == .strict ? "strict" : "optimistic",
+            // Tells a host-owned placement from one the SDK presented in its own
+            // window. Without it the two are indistinguishable in the stream.
+            "presentation_target": presentationTarget,
         ]
         // Included only when the publisher chose the label (2026-08-14
         // reversal): a minted placement_<8hex> id never goes on the wire —

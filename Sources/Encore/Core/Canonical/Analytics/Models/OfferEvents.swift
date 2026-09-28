@@ -712,3 +712,110 @@ struct OfferWebviewDismissedEvent: OfferContextEvent {
         self.placementId = ctx.placementId
     }
 }
+
+/// Tracked when the user taps a `share` action, before the system share sheet
+/// appears. The tap is the intent; `OfferShareCompletedEvent` records whether
+/// anything was actually sent.
+struct OfferShareTappedEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_share_tapped"
+
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let useCase: String
+    let placementId: String?
+
+    init(_ ctx: OfferAnalyticsContext) {
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.variantId = ctx.variantId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+    }
+}
+
+/// Why a share never reached the system sheet.
+enum ShareFailureReason: String {
+    /// No shareable link was available, so there was nothing to send.
+    case missingShareLink = "missing_share_link"
+    /// No view controller was available to present from.
+    case noPresenter = "no_presenter"
+}
+
+/// Tracked when a share tap cannot reach the system sheet. The twin of
+/// `OfferShareTappedEvent`, so a tap always has a terminal event.
+struct OfferShareFailedEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_share_failed"
+
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let useCase: String
+    let placementId: String?
+    let reason: String
+
+    init(_ ctx: OfferAnalyticsContext, reason: ShareFailureReason) {
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.variantId = ctx.variantId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+        self.reason = reason.rawValue
+    }
+}
+
+/// Tracked when the system share sheet closes. `completed` is false when the
+/// user dismissed without picking a destination, so the two events together
+/// give an intent-to-send rate rather than only a tap count.
+struct OfferShareCompletedEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_share_completed"
+
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let useCase: String
+    let placementId: String?
+    /// The `UIActivity.ActivityType` the user picked, nil when cancelled.
+    let shareDestination: String?
+    let completed: Bool
+
+    init(_ ctx: OfferAnalyticsContext, destination: String?, completed: Bool) {
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.variantId = ctx.variantId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+        self.shareDestination = destination
+        self.completed = completed
+    }
+}

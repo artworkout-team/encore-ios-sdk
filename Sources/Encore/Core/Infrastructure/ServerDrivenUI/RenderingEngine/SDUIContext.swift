@@ -18,11 +18,23 @@ class SDUIContext: ObservableObject {
     /// so it all operates in display space automatically. Selection actions
     /// carry the actual `Offer` object, so reordering never changes which
     /// underlying offer is claimed.
-    private(set) var offers: [Offer]
+    ///
+    /// `@Published` because `promoteOffer` reorders it AT RUNTIME, after the
+    /// first render. Before the promote existed this list only ever changed
+    /// inside `initializeFromConfig`, which runs before anything is on screen,
+    /// so nothing had to observe it.
+    @Published private(set) var offers: [Offer]
     @Published var currentIndex: Int?
     let offerContext: OfferContext
     var onAction: (SDUIAction, Offer?) -> Void
-    var onOfferVisible: ((Int) -> Void)?
+    /// An offer became viewable. The offer travels by identity and the index is
+    /// its DISPLAY position, so a variant using `offerDisplayOrder` cannot report
+    /// one offer's impression against another offer's row.
+    ///
+    /// Stateless and repeatable: it fires again whenever layout moves the
+    /// element back across the threshold, so the dedup ledger lives in the
+    /// consumer.
+    var onOfferVisible: ((Offer, Int, SDUIImpressionSource) -> Void)?
     
     // Generic state machine
     @Published var currentState: String = "default"
@@ -227,12 +239,24 @@ class SDUIContext: ObservableObject {
             return currentOffer?.perk ?? ""
         case .offerCtaText:
             return currentOffer?.displayCtaText ?? "Get"
+        case .offerQuickInstructions:
+            return currentOffer?.displayQuickInstructions ?? ""
+        case .offerNewPrice:
+            return currentOffer?.newPrice ?? ""
+        case .offerOldPrice:
+            return currentOffer?.oldPrice ?? ""
         case .titleText:
             return offerContext.titleText ?? "Get 1 month"
         case .accentTitleText:
             return offerContext.accentTitleText ?? " for free"
         case .subtitleText:
             return offerContext.subtitleText ?? "Claim an exclusive offer and get free access to all features"
+        case .categoryName:
+            // Only a `categories` forEach knows it; the renderer answers there.
+            return ""
+        case .instructionTitle, .instructionSubtitle, .instructionCtaText:
+            // Only an `instructions` forEach knows the step, same as above.
+            return ""
         }
     }
     
@@ -243,6 +267,8 @@ class SDUIContext: ObservableObject {
             return targetOffer?.displayPrimaryImageUrl
         case .offerLogoImage:
             return targetOffer?.displayLogoUrl
+        case .offerHeroImage:
+            return targetOffer?.displayHeroImageUrl
         }
     }
     
@@ -373,6 +399,60 @@ class SDUIContext: ObservableObject {
         values["selectedOfferIsFreeTrial"] = offer.isFreeTrialOffer ? "true" : "false"
     }
 
+    /// Move `offer` to `index` in the DISPLAY list, so a pick made in an
+    /// overflow sheet appears in the visible rows.
+    ///
+    /// This is the half of the gift flow no template can express.
+    /// `offerDisplayOrder` is static config applied once, so picking the sixth
+    /// gift left it at position six: the box kept showing gifts one to three
+    /// while the CTA named a gift no visible row showed, and no condition can
+    /// even detect that state.
+    ///
+    /// The destination CLAMPS rather than being refused. `setOfferIndex`
+    /// refuses an absolute index outside the list because that index has to
+    /// name a card it can show. This one names a DESTINATION SLOT, and the
+    /// nearest real slot is always a correct answer, so it clamps exactly like
+    /// `offerIndexDelta` does.
+    ///
+    /// It is a MOVE, not a swap: everything between the two positions shifts by
+    /// one and keeps its relative order. A swap would scatter the list into an
+    /// order the user never chose.
+    ///
+    /// Impressions stay honest across this. The row probe resolves an offer's
+    /// position when it FIRES, and the consumer's ledger is first-write-wins,
+    /// so an offer already seen keeps the position it was seen at and a promote
+    /// bills nothing again.
+    func promoteOffer(_ offer: Offer, to index: Int) {
+        guard !offers.isEmpty,
+              let from = offers.firstIndex(where: { $0.id == offer.id }) else { return }
+        let target = min(max(index, 0), offers.count - 1)
+        guard from != target else { return }
+        var reordered = offers
+        reordered.insert(reordered.remove(at: from), at: target)
+        offers = reordered
+    }
+
+    /// Move the focused offer to `index`, the button-driven counterpart of a
+    /// swipe.
+    ///
+    /// It writes BOTH halves of the focus, because writing one is what made the
+    /// screen disagree with itself before: `currentIndex` alone moves the
+    /// carousel while `currentOffer` still resolves `selectedOfferId`, so the
+    /// CTA keeps naming the offer the user has scrolled away from.
+    ///
+    /// It emits NOTHING. An advance is navigation, not a choice, so it follows
+    /// `selectCenteredOffer` rather than `selectOffer`. The tap itself is
+    /// already recorded by `trackButtonTap`, and the offer a user commits to is
+    /// carried by the claim. A per-advance `SDUIValueSetEvent` would multiply
+    /// the selection signal by however many times the user pressed Next.
+    ///
+    /// An out-of-range index is a no-op.
+    func setOfferIndex(_ index: Int, primaryKey: String = "selectedOfferId") {
+        guard offers.indices.contains(index) else { return }
+        currentIndex = index
+        writeSelectionValues(for: offers[index], primaryKey: primaryKey)
+    }
+
     /// Sync the SELECTED offer to the card the carousel has settled on, so the
     /// centered card is always the selected offer. Called when `currentIndex`
     /// changes via the `.scrollPosition(id:)` binding — the user swiped rather
@@ -476,12 +556,8 @@ class SDUIContext: ObservableObject {
 
     // MARK: - Appearance
 
-    /// Current app appearance, built once from the session's immutable
-    /// `UIValues`. Use this from imperative renderer paths
-    /// (`SDUIElementRenderer`) where SwiftUI's `@Environment(\.sduiAppearance)`
-    /// isn't available. `ViewModifier`s continue reading from the environment
-    /// for consistency and to pick up any env-level overrides.
-    lazy var appearance: Appearance = Appearance(from: offerContext.uiValues)
+    /// The presentation's single resolved appearance; the sheet's environment reads this too.
+    lazy var appearance: Appearance = Appearance(from: offerContext.uiValues, overrides: offerContext.appearance)
 
     /// Resolves an optional `SDUIColor` against the current appearance and the
     /// state-machine values dictionary (so `{"binding": "..."}` colors resolve).

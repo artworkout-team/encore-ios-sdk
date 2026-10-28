@@ -1,32 +1,7 @@
-//
-//  CachedAsyncImage.swift
-//  Encore
-//
-//  AsyncImage replacement that checks URLCache synchronously before going async.
-//  Eliminates the placeholder flash when images are already cached (e.g. after pre-warming).
-//  Shows a subtle shimmer skeleton while loading, then cross-fades the image in.
-//
+// AsyncImage replacement that reads the SDK image cache synchronously first, so a
+// prefetched image draws at once instead of flashing a placeholder.
 
 import SwiftUI
-
-/// Loads an image from a URL with synchronous cache-first resolution.
-///
-/// SwiftUI's `AsyncImage` always starts in the `.empty` phase — even when the
-/// image bytes are sitting in `URLCache`. This causes a visible placeholder
-/// flash on every view appearance. `CachedAsyncImage` checks the shared URL
-/// cache synchronously on init; if the image is already cached it renders
-/// immediately with zero placeholder frames.
-///
-/// When loading async, shows a subtle animated shimmer skeleton instead of a
-/// solid color placeholder, then cross-fades the image in.
-/// The session `CachedAsyncImage` fetches through.
-///
-/// A seam, not a feature: `URLSession.shared` ignores `URLProtocol.registerClass`,
-/// so with it hard-coded no test could count a fetch or serve a body that is not
-/// an image. Production never assigns this.
-enum SDUIImageLoader {
-    nonisolated(unsafe) static var session: URLSession = .shared
-}
 
 /// Why an image did not render.
 ///
@@ -122,7 +97,10 @@ enum SDUICreativeFailureReporter {
     static func reset() { reported.removeAll() }
 }
 
+/// Loads an image with a synchronous cache probe first, so a cached image
+/// renders on the first frame instead of after a placeholder flash.
 struct CachedAsyncImage<Placeholder: View>: View {
+    /// The unresolved URL. The load resolves it to a ladder width.
     let url: URL?
     let contentMode: ContentMode
     @ViewBuilder let placeholder: () -> Placeholder
@@ -145,31 +123,61 @@ struct CachedAsyncImage<Placeholder: View>: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var loadingURL: URL?
 
+    /// Off for a decorative image, where a load that never finishes would
+    /// otherwise shimmer for as long as it is on screen.
+    var shimmers: Bool = true
+    /// The drawn width the url resolves at. nil is the card width.
+    var widthPoints: CGFloat? = nil
+
+    /// What the slot shows. `absent` never shimmers: nothing will load, so a
+    /// shimmer would read as loading forever. `waiting` is a load without one.
+    enum Phase: Equatable { case loaded, absent, loading, waiting }
+
     init(
         url: URL?,
         contentMode: ContentMode,
         @ViewBuilder placeholder: @escaping () -> Placeholder,
         onLoadedVisible: (() -> Void)? = nil,
-        onLoadFailed: ((SDUIImageLoadFailure) -> Void)? = nil
+        onLoadFailed: ((SDUIImageLoadFailure) -> Void)? = nil,
+        shimmers: Bool = true,
+        widthPoints: CGFloat? = nil
     ) {
         self.url = url
         self.contentMode = contentMode
         self.placeholder = placeholder
         self.onLoadedVisible = onLoadedVisible
         self.onLoadFailed = onLoadFailed
+        self.shimmers = shimmers
+        self.widthPoints = widthPoints
         // Seed from the in-memory cache so a recycled carousel card renders its
         // creative on the first frame instead of flashing the shimmer.
-        _image = State(initialValue: Self.cachedImage(for: url))
+        let resolved = url.map { SDUIImageLoader.resolve($0, widthPoints: widthPoints) }
+        let seeded = resolved.flatMap(Self.cachedImage(for:))
+        if let resolved, seeded != nil {
+            SDUIImageLoader.recordDraw(resolved, fromCache: true)
+        }
+        _image = State(initialValue: seeded)
+    }
+
+    static func phase(url: URL?, hasImage: Bool, shimmers: Bool = true) -> Phase {
+        if hasImage { return .loaded }
+        if url == nil { return .absent }
+        return shimmers ? .loading : .waiting
     }
 
     var body: some View {
         Group {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: contentMode)
-                    .modifier(OptionallyOnVisible(action: onLoadedVisible))
-            } else {
+            switch Self.phase(url: url, hasImage: image != nil, shimmers: shimmers) {
+            case .loaded:
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: contentMode)
+                        .modifier(OptionallyOnVisible(action: onLoadedVisible))
+                }
+            case .absent, .waiting:
+                placeholder()
+            case .loading:
                 placeholder()
                     .overlay(ShimmerView())
             }
@@ -194,14 +202,17 @@ struct CachedAsyncImage<Placeholder: View>: View {
         }
         guard image == nil else { return }
 
-        // Synchronous cache probe (memory first, then `URLCache.shared`, which
-        // `OffersManager.preloadImages` pre-warms), so cached images render on
-        // the first frame with no placeholder.
-        if let uiImage = Self.cachedImage(for: url) {
+        // Synchronous cache probe (decoded memory first, then the SDK's fresh
+        // URLCache entry, which `OffersManager` prefetches), so cached images
+        // render on the first frame with no placeholder.
+        let resolved = SDUIImageLoader.resolve(url, widthPoints: widthPoints)
+        if let uiImage = Self.cachedImage(for: resolved) {
+            SDUIImageLoader.recordDraw(resolved, fromCache: true)
             cancelInFlight()
             image = uiImage
             return
         }
+        SDUIImageLoader.recordDraw(resolved, fromCache: false)
 
         // Only a load for the SAME url is already covered. A different url
         // supersedes, so it cancels rather than returning: returning was the
@@ -223,7 +234,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
             // with a thrown transport error, so a creative that never rendered
             // is an error and not a silence.
             do {
-                let (data, response) = try await SDUIImageLoader.session.data(from: url)
+                let (data, response) = try await SDUIImageLoader.load(resolved)
                 // Superseded. Its bytes are for the previous url.
                 guard !Task.isCancelled else { return }
                 guard let uiImage = UIImage(data: data) else {
@@ -232,7 +243,7 @@ struct CachedAsyncImage<Placeholder: View>: View {
                     onLoadFailed?(.undecodable(detail: "\(detail)not an image: ", url: url))
                     return
                 }
-                CachedImageMemoryCache.images.setObject(uiImage, forKey: url as NSURL)
+                CachedImageMemoryCache.images.setObject(uiImage, forKey: resolved as NSURL)
                 image = uiImage
             } catch {
                 // Cancellation throws here too, and a superseded load is not a
@@ -249,15 +260,14 @@ struct CachedAsyncImage<Placeholder: View>: View {
         loadingURL = nil
     }
 
-    private static func cachedImage(for url: URL?) -> UIImage? {
-        guard let url else { return nil }
+    /// `url` is already resolved to its ladder width, so memory and URLCache
+    /// share the key the load stores under.
+    private static func cachedImage(for url: URL) -> UIImage? {
         if let image = CachedImageMemoryCache.images.object(forKey: url as NSURL) {
             return image
         }
-
-        let request = URLRequest(url: url)
-        guard let cached = URLCache.shared.cachedResponse(for: request),
-              let image = UIImage(data: cached.data)
+        guard let data = SDUIImageLoader.cachedData(for: url),
+              let image = UIImage(data: data)
         else { return nil }
         CachedImageMemoryCache.images.setObject(image, forKey: url as NSURL)
         return image
@@ -267,6 +277,47 @@ struct CachedAsyncImage<Placeholder: View>: View {
 @MainActor
 private enum CachedImageMemoryCache {
     static let images = NSCache<NSURL, UIImage>()
+}
+
+// MARK: - Logo Tile
+
+/// The picture slot of an offer that has none: its logo centred on a tile, as
+/// web and Android draw it. The tile, not the logo, carries the impression
+/// probe: a logo that fails to load still leaves the ad on screen.
+struct SDUILogoTile: View {
+    let logoURL: URL?
+    let background: Color
+    let aspectRatio: CGFloat?
+    let contentMode: ContentMode
+    var onVisible: (() -> Void)? = nil
+
+    /// Never shimmers: a logo that fails to load leaves a still tile.
+    static let logoShimmers = false
+
+    /// Web's 72pt logo on a 120pt tile, scaled to the same share of a smaller slot's short side.
+    static func logoSide(in size: CGSize) -> CGFloat {
+        let shortSide = [size.width, size.height].filter { $0.isFinite && $0 > 0 }.min()
+        return shortSide.map { min(72, $0 * 72 / 120) } ?? 72
+    }
+
+    /// Web rounds its 72pt logo by 16pt; a smaller logo keeps that proportion.
+    static func logoCornerRadius(forSide side: CGFloat) -> CGFloat { side * 16 / 72 }
+
+    var body: some View {
+        background
+            .aspectRatio(aspectRatio, contentMode: contentMode)
+            .overlay(GeometryReader { geo in
+                let side = Self.logoSide(in: geo.size)
+                CachedAsyncImage(url: logoURL, contentMode: .fit, placeholder: { Color.clear },
+                                 shimmers: Self.logoShimmers, widthPoints: SDUIImageLoader.logoWidthPoints)
+                    .frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: Self.logoCornerRadius(forSide: side)))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Decorative: the advertiser is named elsewhere on the card.
+                    .accessibilityHidden(true)
+            })
+            .modifier(OptionallyOnVisible(action: onVisible))
+    }
 }
 
 // MARK: - Shimmer Skeleton

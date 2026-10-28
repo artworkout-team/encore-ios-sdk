@@ -20,7 +20,8 @@ public enum DismissReason: String, CaseIterable, Equatable, Sendable {
     case userCancelled = "user_cancelled"
     case lastOfferDeclined = "last_offer_declined"
     case dismissed = "dismissed"
-    /// Claim rejected server-side (HTTP 409, cross-offer provisional cooldown).
+    /// Reserved: a cross-offer claim cooldown. The server never sends one, and 2.3.0+
+    /// no longer produces this value; kept so existing `switch`es still compile.
     case cooldown = "provisional_cooldown"
     /// The flow finished on its own and the SDK closed the sheet.
     case flowCompleted = "flow_completed"
@@ -95,12 +96,37 @@ public struct ClaimedOffer: Sendable, Equatable {
     public let campaignId: String
     public let advertiserName: String
     public let transactionId: String?
+    /// The user tapped "Yes, I finished" and Encore's server granted the prize. Their
+    /// word, not a conversion: it never changes the outcome's stage.
+    public let userConfirmedCompletion: Bool
 
+    /// The 2.2 initializer, kept as its own symbol so binaries built against 2.2 still link.
     public init(offerId: String? = nil, campaignId: String, advertiserName: String, transactionId: String? = nil) {
+        self.init(offerId: offerId, campaignId: campaignId, advertiserName: advertiserName,
+                  transactionId: transactionId, userConfirmedCompletion: false)
+    }
+
+    public init(offerId: String? = nil, campaignId: String, advertiserName: String, transactionId: String? = nil, userConfirmedCompletion: Bool) {
         self.offerId = offerId ?? campaignId
         self.campaignId = campaignId
         self.advertiserName = advertiserName
         self.transactionId = transactionId
+        self.userConfirmedCompletion = userConfirmedCompletion
+    }
+}
+
+internal extension ClaimedOffer {
+    /// The same claim: the same transaction when both carry one, else the same campaign.
+    func isSameClaim(as other: ClaimedOffer) -> Bool {
+        if let transactionId, let otherTransactionId = other.transactionId {
+            return transactionId == otherTransactionId
+        }
+        return campaignId == other.campaignId
+    }
+
+    func confirmingCompletion() -> ClaimedOffer {
+        ClaimedOffer(offerId: offerId, campaignId: campaignId, advertiserName: advertiserName,
+                     transactionId: transactionId, userConfirmedCompletion: true)
     }
 }
 
@@ -112,7 +138,7 @@ public enum AdvertiserOutcome: Sendable, Equatable {
     case claimed(ClaimedOffer)
     /// Server-level confirmation observed in-session.
     case verified(ClaimedOffer)
-    /// Claim rejected server-side (cross-offer provisional cooldown).
+    /// Reserved: a cross-offer claim cooldown. 2.3.0+ no longer produces this value.
     case cooldown
     /// Claim errored — the SDK-side failure the host never saw.
     case failed(EncoreError)
@@ -213,6 +239,23 @@ internal extension PresentationResult {
 // Canonical axis vocabulary for `sdk_placement_resolved` — ported SDKs
 // mirror these strings 1:1, so they are frozen like enum raw values.
 internal extension AdvertiserOutcome {
+    /// The offer of a claimed or verified outcome.
+    var claimedOffer: ClaimedOffer? {
+        switch self {
+        case .claimed(let offer), .verified(let offer): return offer
+        default: return nil
+        }
+    }
+
+    /// The same outcome with its claim marked as confirmed by the user.
+    func confirmingCompletion() -> AdvertiserOutcome {
+        switch self {
+        case .claimed(let offer): return .claimed(offer.confirmingCompletion())
+        case .verified(let offer): return .verified(offer.confirmingCompletion())
+        default: return self
+        }
+    }
+
     var wireValue: String {
         switch self {
         case .notAttempted: return "not_attempted"

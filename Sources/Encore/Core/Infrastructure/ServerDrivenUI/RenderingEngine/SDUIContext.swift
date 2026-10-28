@@ -39,6 +39,11 @@ class SDUIContext: ObservableObject {
     // Generic state machine
     @Published var currentState: String = "default"
     @Published var values: [String: String] = [:]
+
+    /// Per-offer rewordings of `values` (offer id → key → value), e.g. an offer's own
+    /// prize for `publisherRewardTitle`; nil removes the key for that row. Applied only
+    /// inside that offer's `forEach` row, and set only while the sheet shows the promise.
+    @Published var offerValues: [String: [String: String?]] = [:]
     
     // Text lookup maps from config (mapName -> valueKey -> text)
     var textMaps: [String: [String: String]] = [:]
@@ -52,6 +57,23 @@ class SDUIContext: ObservableObject {
 
     /// When false, claimOffer buttons are disabled and grayed out
     @Published var isClaimEnabled: Bool = true
+
+    /// A promised "Yes" is waiting for the server's answer. Until it settles only
+    /// `close` runs, so no second claim or navigation can overtake the claim it answers.
+    @Published var isAwaitingAnswer = false
+
+    // MARK: - Trigger mount (always empty in a sheet)
+
+    /// Host time keys (`start`, `deadline`) for countdown text and progress.
+    @Published var triggerTimes: [String: Date] = [:]
+    /// Host lists for `forEach` with `dataSource: hostList`.
+    @Published var hostLists: [String: [[String: String]]] = [:]
+    /// Offscreen or backgrounded: marquees hold where they are (loops read the environment flag). A tap does not pause.
+    @Published var motionPaused = false
+    /// The clock ticking nodes align to. Replaceable in tests.
+    var triggerClock: () -> Date = Date.init
+
+    func allowsAction(_ type: SDUIActionType) -> Bool { !isAwaitingAnswer || type == .close }
 
     // MARK: - Variant Tracking
     
@@ -74,6 +96,9 @@ class SDUIContext: ObservableObject {
     /// Count of offers claimed in this session
     private(set) var offersClaimed: Int = 0
     
+    /// The session's SDK strings: the snapshot its `OfferContext` took.
+    var strings: SDKStrings
+
     /// Returns the variant context for analytics events
     var variantContext: SDUIVariantContext {
         SDUIVariantContext(
@@ -92,6 +117,7 @@ class SDUIContext: ObservableObject {
         self.offers = offers
         self.currentIndex = currentIndex
         self.offerContext = offerContext
+        self.strings = offerContext.strings
         self.onAction = onAction
     }
     
@@ -229,6 +255,12 @@ class SDUIContext: ObservableObject {
         return offers[index]
     }
 
+    /// `selectedOffer` as it will be once `values` holds these, for a `@Published` subscriber,
+    /// which hears the new value before the property has it.
+    func selectedOffer(values: [String: String]) -> Offer? {
+        values["selectedOfferId"].flatMap { id in offers.first { $0.id == id } }
+    }
+
     func resolveText(_ binding: SDUITextBinding) -> String {
         switch binding {
         case .offerAdvertiserName:
@@ -238,7 +270,7 @@ class SDUIContext: ObservableObject {
         case .offerPerk:
             return currentOffer?.perk ?? ""
         case .offerCtaText:
-            return currentOffer?.displayCtaText ?? "Get"
+            return strings.offerCta(currentOffer)
         case .offerQuickInstructions:
             return currentOffer?.displayQuickInstructions ?? ""
         case .offerNewPrice:
@@ -246,15 +278,15 @@ class SDUIContext: ObservableObject {
         case .offerOldPrice:
             return currentOffer?.oldPrice ?? ""
         case .titleText:
-            return offerContext.titleText ?? "Get 1 month"
+            return offerContext.titleText ?? strings[.fallbackHeadline]
         case .accentTitleText:
-            return offerContext.accentTitleText ?? " for free"
+            return offerContext.accentTitleText ?? strings[.fallbackHeadlineAccent]
         case .subtitleText:
-            return offerContext.subtitleText ?? "Claim an exclusive offer and get free access to all features"
+            return offerContext.subtitleText ?? strings[.fallbackSubheadline]
         case .categoryName:
             // Only a `categories` forEach knows it; the renderer answers there.
             return ""
-        case .instructionTitle, .instructionSubtitle, .instructionCtaText:
+        case .instructionTitle, .instructionSubtitle, .instructionCtaText, .instructionNumber:
             // Only an `instructions` forEach knows the step, same as above.
             return ""
         }
@@ -269,6 +301,9 @@ class SDUIContext: ObservableObject {
             return targetOffer?.displayLogoUrl
         case .offerHeroImage:
             return targetOffer?.displayHeroImageUrl
+        case .instructionImage:
+            // Only an `instructions` forEach knows the step; the renderer answers there.
+            return nil
         }
     }
     
@@ -297,34 +332,45 @@ class SDUIContext: ObservableObject {
     /// like `selectedAdvertiserName`). This lets variant authors write
     /// `${selectedAdvertiserName}` in bottom-copy text and have it update
     /// dynamically when the user taps a different offer card.
-    func resolveTemplateText(_ text: String) -> String {
+    ///
+    /// `row` is the `forEach` row offer, nil outside a row: its `offerValues` apply on top.
+    func resolveTemplateText(_ text: String, row: Offer? = nil) -> String {
         let firstPass = templateText(text).resolved
         // Most templates resolve fully on the first pass; bail before a
         // second O(|values|) scan unless ${...} tokens actually remain.
         guard firstPass.contains("${") else { return firstPass }
 
         var result = firstPass
-        for (key, value) in values {
+        for (key, value) in textValues(row: row) {
             result = result.replacingOccurrences(of: "${\(key)}", with: value)
         }
         return result
     }
     
+    /// `values`, with `row`'s own values over them (nil removes one).
+    func textValues(row: Offer?) -> [String: String] {
+        guard let row, let scoped = offerValues[row.id], !scoped.isEmpty else { return values }
+        var merged = values
+        for (key, value) in scoped { merged[key] = value }
+        return merged
+    }
+
     // MARK: - State Machine Methods
     
     /// Resolve text from a text map based on a stored value
     /// - Parameters:
     ///   - mapKey: The name of the text map to use (e.g., "answerTitles")
     ///   - valueKey: The key in the values dictionary to look up (defaults to mapKey if not specified)
+    ///   - row: The `forEach` row offer, whose rewordings apply to both the lookup and the text
     /// - Returns: The resolved text with template placeholders substituted, or nil if not found
-    func resolveTextMap(mapKey: String, valueKey: String? = nil) -> String? {
+    func resolveTextMap(mapKey: String, valueKey: String? = nil, row: Offer? = nil) -> String? {
         let lookupKey = valueKey ?? mapKey
-        guard let storedValue = values[lookupKey],
+        guard let storedValue = textValues(row: row)[lookupKey],
               let map = textMaps[mapKey],
               let text = map[storedValue] else {
             return nil
         }
-        return resolveTemplateText(text)
+        return resolveTemplateText(text, row: row)
     }
     
     /// Set the current state with analytics tracking
@@ -430,6 +476,17 @@ class SDUIContext: ObservableObject {
         var reordered = offers
         reordered.insert(reordered.remove(at: from), at: target)
         offers = reordered
+    }
+
+    /// Drop an offer the user can no longer claim (they already finished it), keeping
+    /// the focus on the same card where it survives. Clears a selection that named it.
+    func removeOffer(id: String) {
+        guard let index = offers.firstIndex(where: { $0.id == id }) else { return }
+        offers.remove(at: index)
+        if values["selectedOfferId"] == id { values.removeValue(forKey: "selectedOfferId") }
+        if let current = currentIndex {
+            currentIndex = offers.isEmpty ? nil : min(current > index ? current - 1 : current, offers.count - 1)
+        }
     }
 
     /// Move the focused offer to `index`, the button-driven counterpart of a

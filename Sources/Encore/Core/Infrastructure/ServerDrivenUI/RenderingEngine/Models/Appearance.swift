@@ -59,6 +59,33 @@ enum SDUIAppearanceColor: String, Decodable {
     /// helper text. Default: secondary label.
     case muted
 
+    /// Ink for content on an accent fill (trigger mounts only): the trigger's background colour
+    /// when it reads on the accent, else black or white. A sheet using it fails to decode.
+    case inkOnAccent
+
+    /// Secondary copy (trigger mounts only): the publisher's secondary text colour, else the text colour.
+    case secondary
+
+    /// Progress tracks (trigger mounts only): the publisher's track colour, else the text colour.
+    case track
+
+    /// A background gradient's second stop (trigger mounts only): the publisher's
+    /// `backgroundEndColor`, else the background, so a card is solid unless the placement sets it.
+    case backgroundEnd
+
+    /// Tokens that exist only in trigger mounts; a sheet using one fails to decode.
+    static let triggerOnly: Set<SDUIAppearanceColor> = [.inkOnAccent, .secondary, .track, .backgroundEnd]
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        // Trigger-only tokens fail like any unknown token outside a trigger mount.
+        guard let token = SDUIAppearanceColor(rawValue: raw),
+              !Self.triggerOnly.contains(token) || (decoder.userInfo[.sduiTriggerMount] as? Bool) == true else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown appearance token \(raw)"))
+        }
+        self = token
+    }
+
     /// Destructive/error color. Default: system red.
     case error
 }
@@ -71,8 +98,8 @@ enum SDUIAppearanceColor: String, Decodable {
 /// A reference type with identity equality: SwiftUI can then skip dependent
 /// modifiers when the same presentation's appearance is re-injected, instead
 /// of invalidating every `sduiAppearance` reader on each render (an iOS 17
-/// layout-loop trigger).
-final class Appearance: Equatable {
+/// layout-loop trigger). Every property is an immutable `Sendable` value.
+final class Appearance: Equatable, Sendable {
     let accent: Color
     let onAccent: Color
     let accentTitle: Color
@@ -85,9 +112,27 @@ final class Appearance: Equatable {
     let error: Color
     /// True when a publisher background is set, so system colours resolve onto tokens.
     let themesSemantics: Bool
+    /// Set only by a trigger mount (`inkOnAccent` decodes nowhere else).
+    let inkOnAccent: Color?
+    /// The publisher's own secondary text and track colours (trigger mounts only). Unset, the
+    /// tokens fall back to `onBackground`, faded by the node's opacity.
+    let secondary: Color?
+    let track: Color?
+    /// The publisher's `backgroundEndColor` (trigger mounts only); unset, `backgroundEnd` is the background.
+    let backgroundEnd: Color?
 
     static func == (lhs: Appearance, rhs: Appearance) -> Bool {
         lhs === rhs
+    }
+
+    /// Whether `token` is a colour the publisher set, which a node's opacity never fades.
+    func isPublisherSet(_ token: SDUIAppearanceColor) -> Bool {
+        switch token {
+        case .secondary: return secondary != nil
+        case .track: return track != nil
+        case .backgroundEnd: return backgroundEnd != nil
+        default: return false
+        }
     }
 
     /// Lookup — the *only* place the enum-to-stored-property mapping lives.
@@ -104,6 +149,10 @@ final class Appearance: Equatable {
         case .border:       return border
         case .muted:        return muted
         case .error:        return error
+        case .inkOnAccent:  return inkOnAccent ?? onAccent
+        case .secondary:    return secondary ?? onBackground
+        case .track:        return track ?? onBackground
+        case .backgroundEnd: return backgroundEnd ?? background
         }
     }
 
@@ -135,6 +184,10 @@ final class Appearance: Equatable {
         self.onAccent = fallback.onAccent
         self.accentTitle = uiValues?.accentTitleColor.flatMap { Color(hex: $0) } ?? fallback.accentTitle
         self.error = fallback.error
+        self.inkOnAccent = nil
+        self.secondary = nil
+        self.track = nil
+        self.backgroundEnd = nil
 
         // Web derives surface/border/muted from background + text (web-sdk styles.ts).
         guard let background = AppearanceHex.parseField(overrides?.backgroundColor, name: "backgroundColor") else {
@@ -171,7 +224,8 @@ final class Appearance: Equatable {
         }
     }
 
-    /// Explicit memberwise initializer used by `.default` and tests.
+    /// Explicit memberwise initializer used by `.default`, trigger mounts and tests.
+    /// The trigger-only tokens are parameters because an instance is never mutated.
     init(
         accent: Color,
         onAccent: Color,
@@ -182,7 +236,11 @@ final class Appearance: Equatable {
         onSurface: Color,
         border: Color,
         muted: Color,
-        error: Color
+        error: Color,
+        inkOnAccent: Color? = nil,
+        secondary: Color? = nil,
+        track: Color? = nil,
+        backgroundEnd: Color? = nil
     ) {
         self.accent = accent
         self.onAccent = onAccent
@@ -195,6 +253,10 @@ final class Appearance: Equatable {
         self.muted = muted
         self.error = error
         self.themesSemantics = false
+        self.inkOnAccent = inkOnAccent
+        self.secondary = secondary
+        self.track = track
+        self.backgroundEnd = backgroundEnd
     }
 }
 
@@ -300,6 +362,21 @@ extension EnvironmentValues {
     var sduiInsideOfferRow: Bool {
         get { self[SDUIInsideOfferRowKey.self] }
         set { self[SDUIInsideOfferRowKey.self] = newValue }
+    }
+}
+
+/// Whether this element is a button's label. A glyph there may be the
+/// button's only name; anywhere else it is decorative.
+@available(iOS 17.0, *)
+private struct SDUIInsideControlKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+@available(iOS 17.0, *)
+extension EnvironmentValues {
+    var sduiInsideControl: Bool {
+        get { self[SDUIInsideControlKey.self] }
+        set { self[SDUIInsideControlKey.self] = newValue }
     }
 }
 

@@ -23,26 +23,35 @@ enum SDUIPresentationStyle: String, Decodable {
 /// How the offer-claim destination link is opened when the user taps "Claim".
 /// Server-driven so it can be flipped remotely without an SDK update.
 ///
-/// - `inAppSheet`: present the link in an in-app browser
-///   (`SFSafariViewController`) shown as a `.sheet` at a `0.95` detent with a
-///   visible drag indicator. This is the historical (pre-redesign) behavior and
-///   the default when the field is ABSENT — so existing/control variants that
-///   never set the field keep the old claim UX, completion timing, and Safari
-///   analytics.
-/// - `inAppBrowser`: present the link in an in-app browser as a full-screen
-///   `.fullScreenCover` (no detent / drag indicator) — an opt-in.
-/// - `external`: open the user's actual (system) browser via
-///   `UIApplication.shared.open`.
-///
-/// Decodes from the strings `"external"` / `"inAppBrowser"` / `"inAppSheet"`.
+/// - `inAppSheet`: `SFSafariViewController` as a 0.95 `.sheet`. The default
+///   when the field is absent, so control variants keep the old claim UX.
+/// - `inAppBrowser`: `SFSafariViewController` as a `.fullScreenCover`.
+/// - `external`: the system browser via `UIApplication.shared.open`.
+/// - `inAppPreload`: a native claim screen on the tap, then a WKWebView loaded
+///   behind it after the transaction starts (2.3.0+).
+/// - `unrecognized`: a value this build does not know. Plays as `.default`
+///   instead of throwing, which would drop the whole template.
 enum SDUIOfferLinkPresentation: String, Decodable {
     case external = "external"
     case inAppBrowser = "inAppBrowser"
     case inAppSheet = "inAppSheet"
+    case inAppPreload = "inAppPreload"
+    /// Never on the wire; `SDUIValidationTests` fails a variant that decodes to it.
+    case unrecognized = "__unrecognized__"
 
     /// Preserve the pre-redesign behavior when the field is unset: the old
     /// in-app Safari `.sheet` (0.95 detent + drag indicator).
     static var `default`: SDUIOfferLinkPresentation { .inAppSheet }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SDUIOfferLinkPresentation(rawValue: raw).flatMap { $0 == .unrecognized ? nil : $0 } ?? .unrecognized
+    }
+
+    /// The presentation this build actually runs.
+    var resolved: SDUIOfferLinkPresentation {
+        self == .unrecognized ? .default : self
+    }
 }
 
 // MARK: - Config Root
@@ -60,6 +69,11 @@ struct SDUIConfig: Decodable {
     /// `SDUIOfferLinkPresentation.default` (`.inAppSheet` — the old 0.95 in-app
     /// Safari sheet), so absent-field variants keep the pre-redesign behavior.
     var offerLinkPresentation: SDUIOfferLinkPresentation?
+
+    /// The state whose entry starts loading the selected offer's link in the hidden
+    /// `inAppPreload` web view, before the Continue tap (2.4.0+). Ignored for any other
+    /// presentation; a non-string value decodes as absent rather than dropping the template.
+    var preloadOfferLinkOnState: SDUILenientString?
 
     // NEW: State machine configuration
     /// Starting state for the UI (default: "default")
@@ -125,6 +139,20 @@ struct SDUIConfig: Decodable {
     var triggerIAPFirst: Bool?
 }
 
+// MARK: - Lenient String
+
+/// A string field that decodes any other JSON type as absent, so a malformed
+/// optional key costs that feature only, never the whole template.
+struct SDUILenientString: Decodable, Equatable {
+    let value: String?
+
+    init(_ value: String?) { self.value = value }
+
+    init(from decoder: Decoder) throws {
+        value = try? decoder.singleValueContainer().decode(String.self)
+    }
+}
+
 // MARK: - Initial Selection
 
 /// Which offer to pre-select on first render. Decodes from either a keyword
@@ -171,4 +199,106 @@ enum SDUIInitialSelection: Decodable {
 struct SDUIStateActions: Decodable {
     /// Action to execute when entering this state
     var onEnter: SDUIAction?
+}
+
+// MARK: - Action Lookup
+
+extension SDUIConfig {
+    /// Whether any button or state `onEnter` in this variant dispatches `type`.
+    func containsAction(_ type: SDUIActionType) -> Bool {
+        root.containsAction(type)
+            || (stateActions?.values.contains { $0.onEnter?.type == type } ?? false)
+    }
+
+    /// A sheet's `trigger` or `dismissTrigger` is a dead button, so the variant validator fails it.
+    var containsTriggerOnlyAction: Bool {
+        containsAction(.trigger) || containsAction(.dismissTrigger)
+    }
+
+    /// The states that ask "Did you finish?": a `reportCompletion` button sits in
+    /// that state's `stateEquals` branch. An `onEnter` never counts, since it fires
+    /// with no tap. The prize is promised only in a variant that has one.
+    var questionStates: Set<String> {
+        var states = Set<String>()
+        root.collectStates(firing: .reportCompletion, inState: nil, into: &states)
+        return states
+    }
+}
+
+extension SDUIElement {
+    func containsAction(_ type: SDUIActionType) -> Bool {
+        if ownAction?.type == type { return true }
+        return children.contains { $0.containsAction(type) }
+    }
+
+    /// Records the enclosing `stateEquals` state of every button firing `type`.
+    func collectStates(firing type: SDUIActionType, inState state: String?, into states: inout Set<String>) {
+        if ownAction?.type == type, let state { states.insert(state) }
+        if case .conditional(let conditional) = self {
+            if case .stateEquals(let named) = conditional.condition {
+                conditional.ifTrue.collectStates(firing: type, inState: named, into: &states)
+                conditional.ifFalse?.collectStates(firing: type, inState: state, into: &states)
+                return
+            }
+        }
+        for child in children {
+            child.collectStates(firing: type, inState: state, into: &states)
+        }
+    }
+
+    private var ownAction: SDUIAction? {
+        switch self {
+        case .button(let button): return button.action
+        case .slideButton(let button): return button.action
+        default: return nil
+        }
+    }
+
+    /// Every element rendered inside this one, including a style's overlay and
+    /// background, which can hold buttons too.
+    var children: [SDUIElement] {
+        var result: [SDUIElement]
+        switch self {
+        case .button(let button): result = [button.content]
+        case .vStack(let stack), .hStack(let stack), .zStack(let stack): result = stack.children
+        case .scrollView(let scroll): result = [scroll.content]
+        case .conditional(let conditional): result = [conditional.ifTrue] + (conditional.ifFalse.map { [$0] } ?? [])
+        case .forEach(let forEach): result = [forEach.itemTemplate]
+        case .group(let group): result = [group.content]
+        case .toggle(let toggle): result = [toggle.label]
+        case .marquee(let marquee): result = [marquee.content]
+        case .asyncImage(let image): result = image.fallback.map { [$0] } ?? []
+        default: result = []
+        }
+        if let style {
+            result += [style.overlay, style.backgroundElement].compactMap { $0 }
+        }
+        return result
+    }
+
+    /// The element's own style, for the case that carries one.
+    var style: SDUIStyle? {
+        switch self {
+        case .text(let e): return e.style
+        case .systemImage(let e): return e.style
+        case .asyncImage(let e): return e.style
+        case .asyncVideo(let e): return e.style
+        case .appIcon(let e): return e.style
+        case .button(let e): return e.style
+        case .vStack(let e), .hStack(let e), .zStack(let e): return e.style
+        case .spacer(let e): return e.style
+        case .shape(let e): return e.style
+        case .gradient(let e): return e.style
+        case .scrollView(let e): return e.style
+        case .forEach(let e): return e.style
+        case .group(let e): return e.style
+        case .textField(let e): return e.style
+        case .toggle(let e): return e.style
+        case .slideButton(let e): return e.style
+        case .confetti(let e): return e.style
+        case .progress(let e): return e.style
+        case .marquee(let e): return e.style
+        case .conditional, .compactPageIndicator, .empty: return nil
+        }
+    }
 }

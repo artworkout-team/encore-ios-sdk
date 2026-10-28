@@ -37,30 +37,55 @@ struct OfferCardView: View {
         Color(UIColor.label).opacity(0.1)
     }
     
+    /// The hero image's spoken name (`card.image`).
+    static func imageAccessibilityLabel(_ offer: Offer, strings: SDKStrings) -> String {
+        strings.format(.cardImage, ["offerName": offer.advertiserName])
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Offer Image (353x149 aspect ratio)
-            CachedAsyncImage(
-                url: URL(string: offer.displayPrimaryImageUrl ?? ""),
-                contentMode: .fill,
-                placeholder: { placeholderColor }
-            )
-            .frame(maxWidth: .infinity)
-            .aspectRatio(353.0/149.0, contentMode: .fit)
-            .clipped()
-            .cornerRadius(16)
-            
+            // Offer Image (353x149). Filled into a fixed-ratio frame so the card
+            // keeps its height while the image loads. A campaign with no image
+            // shows its logo on a 120pt tile instead of an empty box, as the web
+            // card does.
+            Group {
+                if let imageUrl = SDUIImageSlotPlan.nonBlank(offer.displayPrimaryImageUrl) {
+                    CachedAsyncImage(
+                        url: URL(string: imageUrl),
+                        contentMode: .fill,
+                        placeholder: { placeholderColor }
+                    )
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(353.0/149.0, contentMode: .fit)
+                    .clipped()
+                    .cornerRadius(16)
+                } else {
+                    SDUILogoTile(
+                        logoURL: offer.tileLogoUrl.flatMap(URL.init(string:)),
+                        background: Color(UIColor.secondarySystemBackground),
+                        aspectRatio: nil,
+                        contentMode: .fit
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 120)
+                    .cornerRadius(16)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: Self.imageAccessibilityLabel(offer, strings: offerContext.strings)))
+            .accessibilityAddTraits(.isImage)
+
             // Content Container
             HStack(alignment: .center, spacing: 12) {
-                // Left side: Square Logo
-                CachedAsyncImage(
-                    url: URL(string: offer.displayLogoUrl ?? ""),
-                    contentMode: .fit,
-                    placeholder: { placeholderColor }
-                )
+                // Left side: square logo
+                CachedAsyncImage(url: offer.displayLogoUrl.flatMap(URL.init(string:)), contentMode: .fit,
+                                 placeholder: { placeholderColor }, shimmers: SDUILogoTile.logoShimmers,
+                                 widthPoints: SDUIImageLoader.logoWidthPoints)
                 .frame(width: 50, height: 50)
                 .cornerRadius(8)
                 .clipped()
+                // The advertiser name beside it already says whose logo this is.
+                .accessibilityHidden(true)
                 
                 // Middle: Brand name and description
                 VStack(alignment: .leading, spacing: 2) {
@@ -82,7 +107,7 @@ struct OfferCardView: View {
                 
                 // Right side: CTA Button
                 Button(action: onTap) {
-                    Text(offer.displayCtaText)
+                    Text(offer.displayCtaText(offerContext.strings))
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 27)

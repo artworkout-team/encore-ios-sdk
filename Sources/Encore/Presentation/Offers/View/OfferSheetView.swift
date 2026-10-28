@@ -15,11 +15,14 @@ struct OfferSheetView: View {
     @StateObject private var viewModel: OfferSheetViewModel
     @StateObject private var sduiContext: SDUIContext
 
-    /// Immutable SDUI snapshot for this presentation. Resolving it once keeps
-    /// the recursive config tree out of repeated SwiftUI body evaluation and
-    /// prevents a late config arrival from replacing the visible hierarchy.
-    private let config: SDUIConfig?
-    private let variantId: String?
+    /// The layout this presentation renders, taken once when it mounts: a config
+    /// that lands mid-sheet (a language change) must not swap the template
+    /// under the context's copy, and the recursive config tree stays out of
+    /// repeated config lookups during body evaluation.
+    @State private var config: SDUIConfig?
+    /// The variant and experiment analytics report, taken with `config`.
+    @State private var variantId: String?
+    @State private var experimentId: String?
 
     /// Computed property to determine the preferred color scheme based on appearance mode
     private var preferredColorScheme: ColorScheme? {
@@ -46,6 +49,7 @@ struct OfferSheetView: View {
         offerContext: OfferContext,
         initialStateOverride: String? = nil,
         initiallyPurchased: Bool = false,
+        layout: PresentationLayout? = nil,
         presentationHost: OfferSheetPresentationHost,
         onDismiss: @escaping () -> Void,
         onCompletion: @escaping (Result<PresentationResult, EncoreError>) -> Void
@@ -53,8 +57,10 @@ struct OfferSheetView: View {
         self.initialStateOverride = initialStateOverride
         self.presentationHost = presentationHost
         self.onDismiss = onDismiss
-        config = sduiConfigManager?.layout(for: offerContext.useCase)
-        variantId = sduiConfigManager?.variantId(for: offerContext.useCase)
+        let layout = layout ?? sduiConfigManager?.presentationLayout(for: offerContext.useCase, strings: offerContext.strings)
+        _config = State(initialValue: layout?.config)
+        _variantId = State(initialValue: layout?.variantId)
+        _experimentId = State(initialValue: layout?.experimentId)
 
         let handler = SheetDismissHandler(onCompletion: onCompletion, initiallyPurchased: initiallyPurchased)
         _viewModel = StateObject(wrappedValue: OfferSheetViewModel(
@@ -64,7 +70,9 @@ struct OfferSheetView: View {
             placementId: placementId,
             placementLabel: placementLabel,
             offerContext: offerContext,
-            completionHandler: handler
+            completionHandler: handler,
+            layout: layout?.config,
+            claimVariantId: layout?.renderedVariantId
         ))
 
         // Create SDUI context with offer context (includes remote config + IAP data)
@@ -87,6 +95,7 @@ struct OfferSheetView: View {
         .overlay {
             if viewModel.verificationState != .idle {
                 VerificationPendingView(
+                    strings: viewModel.offerContext.strings,
                     isTimedOut: viewModel.verificationState == .timedOut,
                     onRetry: { viewModel.retryVerification() },
                     onCancel: { viewModel.cancelVerification() }
@@ -103,6 +112,7 @@ struct OfferSheetView: View {
             // Set variant metadata for analytics
             viewModel.setVariantMetadata(
                 variantId: variantId,
+                experimentId: experimentId,
                 context: sduiContext
             )
 
@@ -117,7 +127,7 @@ struct OfferSheetView: View {
                 } else if let onEnterAction = onEnterAction {
                     // Execute onEnter action for initial state (only if no override)
                     Logger.info(.presentation, "Executing onEnter action for initial state: \(sduiContext.currentState)")
-                    viewModel.handleSDUIAction(onEnterAction, offer: sduiContext.currentOffer)
+                    viewModel.handleSDUIAction(onEnterAction, offer: sduiContext.currentOffer, trigger: .onEnter)
                 }
             }
 
@@ -128,6 +138,11 @@ struct OfferSheetView: View {
                 sduiContext.values["email"] = email
             }
 
+            // After the config's initial values are in: it replaces the dictionary.
+            viewModel.preparePublisherReward(config: config, context: sduiContext)
+            // After the initial state and selection are in, so an initial preload state counts.
+            viewModel.startStepsPreload(on: sduiContext)
+
             // Offer impressions come from the offer row's visibility probe.
             // A featured offer drawn outside a row falls back to its primary
             // creative.
@@ -135,6 +150,7 @@ struct OfferSheetView: View {
         }
         .onDisappear {
             Logger.info(.presentation, "onDisappear fired")
+            viewModel.endStepsPreload()
 
             // A claim shadows the gesture on `decline_reason`, as it did in
             // 1.x, so historical row counts keep their meaning. Otherwise the
@@ -193,17 +209,31 @@ struct OfferSheetView: View {
         .presentationBackground(sduiContext.appearance.background)
         .interactiveDismissDisabled(false)
         .preferredColorScheme(preferredColorScheme)
-        // Two distinct in-app Safari presentations — only one wrapper is ever
-        // non-nil. The SHEET (0.95 detent + drag indicator) is the old/default
-        // (`.inAppSheet`) claim UX; the fullScreenCover is the opt-in
-        // (`.inAppBrowser`). Both dismiss paths route through
-        // `handleSafariDismiss()` so grant/transition are identical.
+        // Only one wrapper is ever set: the sheet is `.inAppSheet`; the cover is `.inAppBrowser` and the
+        // `.external` fallback. Both dismiss through `handleSafariDismiss()`, so the grant is identical.
         .sheet(item: $viewModel.safariSheetWrapper) { wrapper in
             safariSheet(for: wrapper)
         }
         .fullScreenCover(item: $viewModel.safariCoverWrapper) { wrapper in
             safariCover(for: wrapper)
         }
+        // `.inAppPreload`: claim screen, hidden web view, then the in-app browser.
+        // The two × are the exits; any other disappearance is settled the same way.
+        .fullScreenCover(item: $viewModel.claimPreload) { controller in
+            ClaimPreloadCover(
+                controller: controller,
+                strings: viewModel.offerContext.strings,
+                onClose: { viewModel.handleClaimPreloadClosed() },
+                onEscape: { viewModel.handleClaimPreloadEscaped() }
+            )
+            .preferredColorScheme(.light)
+            // A cover is its own presentation: carry the served direction into it.
+            .modifier(ServedLayoutDirectionModifier(locale: viewModel.offerContext.servedLocale))
+            .interactiveDismissDisabled()
+            .onDisappear { viewModel.handleClaimPreloadDisappeared(controller) }
+        }
+        // Rows under the claim screen are not seen; they are checked again when it lifts.
+        .environment(\.visibilityProbesPaused, viewModel.claimPreload != nil)
         .onChange(of: sduiContext.currentIndex) { oldValue, newValue in
             viewModel.currentOfferIndex = newValue
             if let newIndex = newValue {
@@ -327,6 +357,6 @@ private extension View {
 #Preview {
     Color.clear
         .sheet(isPresented: .constant(true)) {
-            Text("Offer Sheet Preview")
+            Text(verbatim: "Offer Sheet Preview")
         }
 }

@@ -24,6 +24,9 @@ internal struct RemoteConfigurationRepository: Sendable {
     /// creatives on an id with no links and filters every campaign to zero.
     /// The scope FORMAT is repository schema — callers pass raw ingredients.
     private let cacheScope: String
+    /// The Accept-Language value the HTTP client sends, captured once at init
+    /// like the header itself (iOS relaunches the app on a language change).
+    let deviceLocale: String?
 
     // MARK: - Storage Keys (Repository owns the schema)
     private enum Keys {
@@ -43,13 +46,16 @@ internal struct RemoteConfigurationRepository: Sendable {
         storage: KeyValueStore,
         templateStore: TemplateStore,
         environment: EnvironmentConfiguration? = nil,
-        apiKey: String? = nil
+        apiKey: String? = nil,
+        deviceLocale: String? = nil
     ) {
         self.client = client
         self.storage = storage
         self.templateStore = templateStore
         self.cacheScope = environment.map { "\($0).\(apiKey.map { String($0.suffix(8)) } ?? "")" } ?? ""
+        self.deviceLocale = deviceLocale
     }
+
 
     // MARK: - Local Access (Sync, Disk/Cache)
 
@@ -57,6 +63,17 @@ internal struct RemoteConfigurationRepository: Sendable {
     /// Synchronous - returns immediately from cache.
     func getLocal() -> RemoteConfiguration? {
         storage.load(configKey)
+    }
+
+    /// The blob for a session requesting `language`. One stamped for another
+    /// language or device locale (or never stamped) keeps only its app facts.
+    func getLocal(forLanguage language: String?) -> RemoteConfiguration? {
+        guard let blob = getLocal() else { return nil }
+        guard blob.language == language, blob.deviceLocale == deviceLocale else {
+            Logger.info("📦 [RemoteConfig] Cached copy is for \(blob.language ?? "device") / \(blob.deviceLocale ?? "unstamped"), session wants \(language ?? "device") / \(deviceLocale ?? "none"); keeping app facts only")
+            return blob.withoutCopy()
+        }
+        return blob
     }
 
     /// Save configuration to local storage.
@@ -93,11 +110,8 @@ internal struct RemoteConfigurationRepository: Sendable {
     /// - Parameters:
     ///   - userId: User ID for deterministic variant assignment
     ///   - sdkVersion: SDK version for compatibility filtering
-    ///   - language: Optional ISO 639-1 language code from `UserAttributes.language`.
-    ///     When non-nil, takes precedence over the device's `Accept-Language`
-    ///     header in the backend's locale resolver. Lets host apps with their
-    ///     own in-app language picker drive `/config` localization without
-    ///     flipping the device locale.
+    ///   - language: The host's `setLanguage` tag. When non-nil, the backend
+    ///     prefers it over the device's `Accept-Language`.
     ///   - useCase: Which use case's variant to **resolve** — experiments and
     ///     all. The parameter is **omitted** for `.reduceChurn` so the
     ///     request stays byte-identical to what every already-shipped SDK
@@ -133,7 +147,9 @@ internal struct RemoteConfigurationRepository: Sendable {
             method: "GET",
             query: query
         )
-        let bundle = RemoteConfigurationBundle(from: dto, requestedFor: useCase)
+        let bundle = RemoteConfigurationBundle(
+            from: dto, requestedFor: useCase, language: language, deviceLocale: deviceLocale
+        )
         // Persisting a demo response would let rung 2 keep serving the
         // requested variant after the request is cleared.
         if demoVariant == nil {
@@ -147,7 +163,7 @@ internal struct RemoteConfigurationRepository: Sendable {
     /// The last-known-good template stored for `useCase`, or nil when absent
     /// or stamped for a different identity.
     func storedTemplate(for useCase: UseCase, userId: String, language: String?) -> StoredTemplate? {
-        templateStore.load(useCase: useCase, userId: userId, language: language)
+        templateStore.load(useCase: useCase, userId: userId, language: language, deviceLocale: deviceLocale)
     }
 
     /// Deletes every stored template. Called on logout/reset and on identity
@@ -172,7 +188,8 @@ internal struct RemoteConfigurationRepository: Sendable {
     ) {
         // `ui` always persists: it carries the requested use case's ASSIGNED
         // arm on every request shape.
-        persist(bundle.useCase, ui: bundle.configuration.ui, raw: rawTemplateData(dto.ui.template), userId: userId, language: language)
+        persist(bundle.useCase, ui: bundle.configuration.ui, raw: rawTemplateData(dto.ui.template),
+                userId: userId, language: language, locale: dto.locale)
 
         // The prefetch block carries DEFAULT arms. Persisting it from a
         // by-name (?useCase=) fetch would overwrite the user's assigned arms
@@ -181,11 +198,13 @@ internal struct RemoteConfigurationRepository: Sendable {
         guard !bundle.useCase.needsConfigQueryParameter else { return }
         for (useCase, configuration) in bundle.prefetched {
             let raw = rawTemplateData(dto.useCases?[useCase.rawValue]?.template)
-            persist(useCase, ui: configuration.ui, raw: raw, userId: userId, language: language)
+            persist(useCase, ui: configuration.ui, raw: raw, userId: userId, language: language, locale: dto.locale)
         }
     }
 
-    private func persist(_ useCase: UseCase, ui: UIConfiguration, raw: Data?, userId: String, language: String?) {
+    private func persist(
+        _ useCase: UseCase, ui: UIConfiguration, raw: Data?, userId: String, language: String?, locale: String?
+    ) {
         guard let raw, ui.template != nil else {
             templateStore.delete(useCase: useCase)
             return
@@ -193,11 +212,14 @@ internal struct RemoteConfigurationRepository: Sendable {
         templateStore.save(StoredTemplate(
             useCase: useCase,
             variantId: ui.variantId,
+            experimentId: ui.experimentId,
             variantName: ui.variantName,
             uiValues: ui.values,
             template: raw,
             userId: userId,
-            language: language
+            language: language,
+            deviceLocale: deviceLocale,
+            locale: locale
         ))
     }
 

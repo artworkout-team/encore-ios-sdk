@@ -9,7 +9,7 @@ import SwiftUI
 
 /// Strict CSS-order hex parser for publisher-supplied colours.
 enum AppearanceHex {
-    struct RGBA: Equatable {
+    struct RGBA: Hashable {
         let r: UInt8, g: UInt8, b: UInt8, a: UInt8
 
         var color: Color {
@@ -18,12 +18,22 @@ enum AppearanceHex {
 
         /// Black or white text for this background, by WCAG relative luminance (0.179 split).
         var contrastingInk: RGBA {
+            luminance > 0.179 ? RGBA(r: 0, g: 0, b: 0, a: 255) : RGBA(r: 255, g: 255, b: 255, a: 255)
+        }
+
+        /// WCAG relative luminance, 0...1.
+        var luminance: Double {
             func linear(_ c: UInt8) -> Double {
                 let v = Double(c) / 255
                 return v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
             }
-            let luminance = 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
-            return luminance > 0.179 ? RGBA(r: 0, g: 0, b: 0, a: 255) : RGBA(r: 255, g: 255, b: 255, a: 255)
+            return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+        }
+
+        /// WCAG contrast ratio between two colours, 1...21.
+        static func contrastRatio(_ a: RGBA, _ b: RGBA) -> Double {
+            let (hi, lo) = (max(a.luminance, b.luminance), min(a.luminance, b.luminance))
+            return (hi + 0.05) / (lo + 0.05)
         }
     }
 

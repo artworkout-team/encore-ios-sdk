@@ -60,6 +60,18 @@ internal final class MockHTTPClient: HTTPClientProtocol {
         
         throw EncoreError.protocol(.api(status: 404, code: "unknown_path", message: "Unknown mock path: \(path)"))
     }
+
+    /// The outbox's pre-serialized body. Routed like the `body:` overload: the
+    /// mock answers by path, never by body.
+    func request<T: Decodable>(
+        path: String,
+        method: String,
+        bodyData: Data?,
+        query: [String: String?]?,
+        headers: [String: String]
+    ) async throws -> T {
+        try await request(path: path, method: method, body: nil, query: query, headers: headers)
+    }
     
     // MARK: - Mock Handlers
     

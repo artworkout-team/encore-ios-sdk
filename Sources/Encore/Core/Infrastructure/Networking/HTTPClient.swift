@@ -26,6 +26,15 @@ internal protocol HTTPClientProtocol: Sendable {
         query: [String: String?]?,
         headers: [String: String]
     ) async throws -> T
+
+    /// `request` that also returns the HTTP status, for a caller that trusts only an exact code.
+    func requestWithStatus<T: Decodable>(
+        path: String,
+        method: String,
+        body: Encodable?,
+        query: [String: String?]?,
+        headers: [String: String]
+    ) async throws -> (T, Int)
 }
 
 // Protocol extension for default parameters
@@ -39,16 +48,20 @@ extension HTTPClientProtocol {
     ) async throws -> T {
         try await request(path: path, method: method, body: body, query: query, headers: headers)
     }
-    
-    func request<T: Decodable>(
+    /// A stand-in client that knows no status reports 200 for any answer it decodes.
+    func requestWithStatus<T: Decodable>(
         path: String,
         method: String,
-        bodyData: Data?,
-        query: [String: String?]? = nil,
-        headers: [String: String] = [:]
-    ) async throws -> T {
-        try await request(path: path, method: method, bodyData: bodyData, query: query, headers: headers)
+        body: Encodable?,
+        query: [String: String?]?,
+        headers: [String: String]
+    ) async throws -> (T, Int) {
+        let value: T = try await request(path: path, method: method, body: body, query: query, headers: headers)
+        return (value, 200)
     }
+    // No default for the `bodyData:` overload: one with this signature would
+    // satisfy the requirement and call itself, so a conformer that forgot the
+    // overload recursed without end. Without it, forgetting is a compile error.
 }
 
 // MARK: - HTTP Client Implementation
@@ -86,6 +99,27 @@ internal final class HTTPClient: HTTPClientProtocol, Sendable {
         query: [String: String?]? = nil,
         headers: [String: String] = [:]
     ) async throws -> T {
+        try await perform(path: path, method: method, bodyData: bodyData, query: query, headers: headers).0
+    }
+
+    func requestWithStatus<T: Decodable>(
+        path: String,
+        method: String,
+        body: Encodable?,
+        query: [String: String?]?,
+        headers: [String: String]
+    ) async throws -> (T, Int) {
+        let bodyData = try body.map { try JSONCoding.encoder.encode($0) }
+        return try await perform(path: path, method: method, bodyData: bodyData, query: query, headers: headers)
+    }
+
+    private func perform<T: Decodable>(
+        path: String,
+        method: String,
+        bodyData: Data?,
+        query: [String: String?]?,
+        headers: [String: String]
+    ) async throws -> (T, Int) {
         let urlRequest = buildRequest(path: path, method: method, bodyData: bodyData, query: query, headers: headers)
         
         Logger.debug(.network, "\(method) \(urlRequest.url?.absoluteString ?? path)")
@@ -117,12 +151,12 @@ internal final class HTTPClient: HTTPClientProtocol, Sendable {
         
         // Handle empty responses - shortcut for endpoints that return no body
         if data.isEmpty, let empty = EmptyResponse() as? T {
-            return empty
+            return (empty, httpResponse.statusCode)
         }
         
         // Decode response (empty data for non-EmptyResponse types will fail here as contract drift)
         do {
-            return try JSONCoding.decoder.decode(T.self, from: data)
+            return (try JSONCoding.decoder.decode(T.self, from: data), httpResponse.statusCode)
         } catch {
             Logger.debug(.network, "Decoding error for \(T.self): \(error)")
             throw EncoreError.protocol(.decoding(error))
@@ -130,8 +164,18 @@ internal final class HTTPClient: HTTPClientProtocol, Sendable {
     }
     
     // MARK: - Private Helpers
-    
-    private func buildRequest(
+
+    /// `/config` (the sheet's and every trigger's) gives up after 10 s instead of URLSession's
+    /// 60 s: a trigger or sheet waiting on it draws nothing until then. A timed-out request is not
+    /// retried by itself; it fails like any other (see the callers).
+    static let configTimeout: TimeInterval = 10
+
+    /// The request timeout for `path`; nil keeps URLSession's default.
+    static func timeout(forPath path: String) -> TimeInterval? {
+        path == "config" ? configTimeout : nil
+    }
+
+    func buildRequest(
         path: String,
         method: String,
         bodyData: Data?,
@@ -165,7 +209,8 @@ internal final class HTTPClient: HTTPClientProtocol, Sendable {
         }
         
         request.httpBody = bodyData
-        
+        if let timeout = Self.timeout(forPath: path) { request.timeoutInterval = timeout }
+
         return request
     }
 }

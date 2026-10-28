@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name         = "EncoreKit"
   s.module_name  = "Encore"
-  s.version      = "2.2.0"
+  s.version      = "2.4.0"
   s.summary      = "Encore iOS SDK"
   s.homepage     = "https://github.com/EncoreKit/ios-sdk"
   s.license      = { :type => "Proprietary" }

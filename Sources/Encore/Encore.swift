@@ -33,6 +33,22 @@ public protocol EncoreProtocol: AnyObject {
 
     func revokeEntitlements() async throws
     func revokeEntitlements(onCompletion: @escaping (Result<Void, EncoreError>) -> Void)
+
+    /// Serves Encore's copy in `tag` (BCP 47, e.g. "pt-BR") until cleared, whatever the device language.
+    func setLanguage(_ tag: String)
+
+    /// Removes a host-set language so copy follows the device language again.
+    func clearLanguage()
+}
+
+/// Requirements with defaults, so host conformers written before 2.3.0
+/// (test doubles) keep compiling.
+public extension EncoreProtocol {
+    /// Default: no-op. `Encore` implements the real set.
+    func setLanguage(_ tag: String) {}
+
+    /// Default: no-op. `Encore` implements the real clear.
+    func clearLanguage() {}
 }
 
 // MARK: - Encore SDK Facade
@@ -48,7 +64,7 @@ public protocol EncoreProtocol: AnyObject {
 /// progressing app UI.
 @MainActor
 public final class Encore: EncoreProtocol {
-    internal static let sdkVersion: String = "2.2.0"
+    internal static let sdkVersion: String = "2.4.0"
     // Write-once references (assigned in configure(), read pervasively from
     // nonisolated accessors). Safe: Swift reference assignment is atomic and
     // these never change after configuration.
@@ -74,8 +90,13 @@ public final class Encore: EncoreProtocol {
 
     /// Controls whether the claim CTA on offer cards is tappable.
     /// Set to `false` to gray out and disable the claim button. Runtime-mutable
-    /// (not an `Options` field) so hosts can gate claims mid-session.
-    public var isClaimEnabled: Bool = true
+    /// (not an `Options` field) so hosts can gate claims mid-session, an open sheet included.
+    public var isClaimEnabled: Bool = true {
+        didSet { claimEnabledChanges.send(isClaimEnabled) }
+    }
+
+    /// Every change to `isClaimEnabled`, so an open sheet follows it.
+    internal let claimEnabledChanges = PassthroughSubject<Bool, Never>()
 
     /// Purchase mechanism: your ``EncorePurchaseController`` that runs real purchases
     /// through your subscription manager and returns a normalized ``EncorePurchaseResult``.
@@ -98,14 +119,45 @@ public final class Encore: EncoreProtocol {
             await services.remoteConfigManager.awaitInFlightFetch()
             services.offers.prefetch(
                 userId: services.user.currentUserId,
-                attributes: services.user.userAttributes,
-                variantId: services.remoteConfigManager.ui?.variantId
+                attributes: services.user.requestAttributes,
+                variantId: services.remoteConfigManager.ui?.variantId,
+                useCase: .reduceChurn
             )
             // Same warm-up as configure() — see the note there.
             if let productId = services.remoteConfigManager.iapProductId {
                 _ = await IAPClient.fetchProductInfo(productId: productId)
             }
             await Self.warmEnabledUseCases(services, userId: services.user.currentUserId)
+        }
+    }
+
+    /// The launch `/config` fetch and warm-ups, held until the app first becomes active, so a
+    /// background launch fetches nothing. They read the current user, so an identify() first is covered.
+    internal func scheduleLaunchWarmUp(_ container: ServiceContainer) {
+        container.foregroundGate.runWhenOpen { [weak container] in
+            guard let container else { return }
+            container.remoteConfigManager.fetch(
+                userId: container.user.currentUserId,
+                sdkVersion: Encore.sdkVersion,
+                language: container.user.language
+            )
+            // Behind the fetch above: the cached variant id can filter every campaign out server-side.
+            Task { [weak container] in
+                guard let container else { return }
+                await container.remoteConfigManager.awaitInFlightFetch()
+                container.offers.prefetch(
+                    userId: container.user.currentUserId,
+                    attributes: container.user.requestAttributes,
+                    variantId: container.remoteConfigManager.ui?.variantId,
+                    useCase: .reduceChurn
+                )
+                // Warm StoreKit's product cache off the tap path, where a cold lookup was the whole tail.
+                if let productId = container.remoteConfigManager.iapProductId {
+                    _ = await IAPClient.fetchProductInfo(productId: productId)
+                }
+                // Image warm for every other enabled use case, disk gated, so about once per device.
+                await Self.warmEnabledUseCases(container, userId: container.user.currentUserId)
+            }
         }
     }
 
@@ -121,7 +173,7 @@ public final class Encore: EncoreProtocol {
                     await container.offers.warmImagesIfNeeded(
                         useCase: useCase,
                         userId: userId,
-                        attributes: container.user.userAttributes,
+                        attributes: container.user.requestAttributes,
                         variantId: ui.variantId
                     )
                 }
@@ -166,6 +218,12 @@ public final class Encore: EncoreProtocol {
         self.lifecycle = AppLifecycle()
         let container = ServiceContainer(configuration: config)
         self.services = container
+        #if DEBUG
+        // The demo app's tester controls for its Gifts to Reminder screen; none in a release build.
+        ClaimLogDebugCommands.install()
+        TriggerDebugStrings.install()
+        #endif
+        LegacyPrizeCount.remove()
         // Late strict-unlock verification: refresh grants, then surface on outcomes.
         container.strictUnlockReconciler.onVerified = { [weak self] transactionId in
             try? await entitlementsManager?.refreshEntitlements()
@@ -175,37 +233,13 @@ public final class Encore: EncoreProtocol {
 
         // Set initial userId for infrastructure (UserManager ensures userId exists)
         let initialUserId = container.user.currentUserId
-        container.remoteConfigManager.fetch(
-            userId: initialUserId,
-            sdkVersion: Encore.sdkVersion,
-            language: container.user.userAttributes.language
-        )
-        // Warm-up is sequenced BEHIND config resolution: prefetching with the
-        // disk-cached variant races the /config fetch just dispatched above,
-        // shipping a stale (or different-environment) variant id whose
-        // server-side creative join can filter every campaign to zero. The
-        // prefetch is background warming, so waiting one config round trip
-        // costs no user-facing latency; if the fetch fails, the cached
-        // variant is the correct offline fallback.
-        Task { [weak container] in
-            guard let container else { return }
-            await container.remoteConfigManager.awaitInFlightFetch()
-            container.offers.prefetch(
-                userId: initialUserId,
-                attributes: container.user.userAttributes,
-                variantId: container.remoteConfigManager.ui?.variantId
-            )
-            // Warm StoreKit's product cache off the tap path: the cold first
-            // lookup was the entire present-time tail, and after this the
-            // bounded tap-time fetch is a cache hit that never times out.
-            if let productId = container.remoteConfigManager.iapProductId {
-                _ = await IAPClient.fetchProductInfo(productId: productId)
-            }
-            // Bootstrap image warm for every OTHER enabled use case. Disk
-            // gated, so the extra /offers/search fires roughly once per device
-            // rather than once per launch. Reads the CURRENT user at warm
-            // time, so an identify() racing configure warms the winner.
-            await Self.warmEnabledUseCases(container, userId: container.user.currentUserId)
+        scheduleLaunchWarmUp(container)
+        if let lifecycle {
+            let launchedInBackground = ForegroundGate.launchedInBackground
+            Logger.debug(.configuration, "Launch warm-up \(launchedInBackground ? "held until the app is first active" : "starting now")")
+            container.foregroundGate.start(launchedInBackground: launchedInBackground, didForeground: lifecycle.didForeground)
+        } else {
+            container.foregroundGate.open()
         }
         container.analytics.identifyUser(userId: initialUserId, attributes: container.user.userAttributes)
         container.errors.setUserId(initialUserId)
@@ -215,6 +249,8 @@ public final class Encore: EncoreProtocol {
             SDKInitializedEvent(sdkVersion: Encore.sdkVersion, appBundleId: config.appBundleId)
         )
         Logger.info(.configuration, "SDK configured for \(config.environment) (via \(config.environmentSource)) | apiKey: \(String(config.apiKey.prefix(8)))... | baseURL: \(config.environment.apiBaseURL)")
+        // An EncoreClaim made before configure loads now.
+        NotificationCenter.default.post(name: .encoreDidConfigure, object: nil)
         if let purchaseController {
             Logger.info(.iap, "PurchaseController registered: \(type(of: purchaseController))")
         }
@@ -241,21 +277,46 @@ public final class Encore: EncoreProtocol {
         }
         
         let previousUserId = userManager.currentUserId
+        let wasAnonymous = !userManager.isIdentified
+        let languageChanged = attributes.map { forwardLegacyLanguage($0, to: userManager) } ?? false
         let changed = userManager.identify(userId: userId, attributes: attributes)
-        guard changed else { return }
+        // An anonymous user's claims follow them when they identify, as the server moves them.
+        if wasAnonymous { ClaimLog.shared.carryOver(from: previousUserId, to: userId) }
+        // The anonymous user's Gifts Button tally follows them to their first identify (their own
+        // anonymous id included); anyone else's goes.
+        if wasAnonymous || previousUserId != userId { GiftsButtonTally.live.identified(from: previousUserId, as: userId) }
+        guard changed || languageChanged else { return }
+        // Same user and language, new attributes: the cached offers were searched with the old ones
+        // (the cache key holds only country and language). Cleared first, so the refetch and the
+        // triggers' re-check search fresh.
+        let targetingChanged = previousUserId == userId && !languageChanged && changed
+        if targetingChanged { services?.offers.clearCache() }
 
-        remoteConfigManager.fetch(
-            userId: userId,
-            sdkVersion: Encore.sdkVersion,
-            language: userManager.userAttributes.language
-        )
-        if previousUserId != userId || attributes != nil {
-            refetchOffers()
+        // Before the app first becomes active, the held launch warm-up fetches for this user.
+        if services?.foregroundGate.isOpen ?? true {
+            remoteConfigManager.fetch(
+                userId: userId,
+                sdkVersion: Encore.sdkVersion,
+                language: userManager.language
+            )
+            if previousUserId != userId || attributes != nil {
+                refetchOffers()
+            }
         }
         if previousUserId != userId {
+            // identify() links the previous id into this one, so its self-reported
+            // campaigns move too. The server carries its own records.
+            selfReportedCampaigns.carryOver(from: previousUserId, to: userId)
             entitlementsManager.reset(thenRefresh: true)
             // A pending strict claim belongs to the previous user.
             strictUnlockReconciler?.clearPending()
+        }
+        if previousUserId != userId || languageChanged {
+            // Mounted triggers drop their cached variants and start over for the new user or language.
+            TriggerIdentityChange.post()
+        } else if targetingChanged {
+            // Same user and language, new attributes: the offers a trigger found may differ.
+            NotificationCenter.default.post(name: .encoreOfferTargetingDidChange, object: nil)
         }
         analyticsClient.identifyUser(userId: userManager.currentUserId, attributes: userManager.userAttributes)
         errorsClient.setUserId(userManager.currentUserId)
@@ -269,21 +330,16 @@ public final class Encore: EncoreProtocol {
             return
         }
 
-        let previousLanguage = userManager.userAttributes.language
-        guard let mergedAttributes = userManager.setAttributes(attributes) else { return }
-        analyticsClient.identifyUser(userId: userManager.currentUserId, attributes: mergedAttributes)
-
-        // Re-fetch /config and /offers when the language attribute changes so
-        // both paywall copy + SDUI variant text and offer cards reflect the
-        // new locale on next presentation. No-op when language is unchanged.
-        if attributes.language != nil && attributes.language != previousLanguage,
-           let remoteConfigManager = remoteConfigManager {
-            remoteConfigManager.fetch(
-                userId: userManager.currentUserId,
-                sdkVersion: Encore.sdkVersion,
-                language: mergedAttributes.language
-            )
-            refetchOffers()
+        let languageChanged = forwardLegacyLanguage(attributes, to: userManager)
+        let merged = userManager.setAttributes(attributes)
+        if languageChanged {
+            applyLanguage(userManager)  // identifies with the merged attributes too
+        } else if let merged {
+            analyticsClient.identifyUser(userId: userManager.currentUserId, attributes: merged)
+            // The offers a mounted trigger found may differ for the new attributes: drop the sets
+            // searched with the old ones first, so the re-check searches fresh.
+            services?.offers.clearCache()
+            NotificationCenter.default.post(name: .encoreOfferTargetingDidChange, object: nil)
         }
     }
 
@@ -300,6 +356,69 @@ public final class Encore: EncoreProtocol {
             return
         }
         remoteConfigManager.setDemoVariant(variantName, for: useCase)
+    }
+
+    // MARK: - Language
+
+    /// Serves Encore's copy in `tag` (BCP 47, e.g. "pt-BR" or "fr") instead of the
+    /// device language. Kept on the device until ``clearLanguage()``, across launches
+    /// and `reset()`; never sent to Encore as a user attribute. Call after `configure`.
+    public func setLanguage(_ tag: String) {
+        guard let userManager = userManager else {
+            Logger.error(.integration(.notConfigured), context: .configuration)
+            return
+        }
+        if setLanguageTag(tag, on: userManager) {
+            applyLanguage(userManager)
+        }
+    }
+
+    /// Removes a language set with ``setLanguage(_:)`` so copy follows the device
+    /// language again. Keeps the user and every attribute.
+    public func clearLanguage() {
+        guard let userManager = userManager else {
+            Logger.error(.integration(.notConfigured), context: .configuration)
+            return
+        }
+        if userManager.clearLanguage() {
+            applyLanguage(userManager)
+        }
+    }
+
+    /// How many times the `UserAttributes.language` deprecation was logged this launch (at most 1).
+    internal static var legacyLanguageWarnings = 0
+
+    /// Stores a valid tag as the override. Returns whether it changed.
+    private func setLanguageTag(_ tag: String, on userManager: UserManager) -> Bool {
+        guard LanguageTag.normalized(tag) != nil else {
+            Logger.warn("[INTEGRATION] setLanguage got \"\(tag)\", which is not a BCP 47 language tag; ignored, keeping \(userManager.language ?? "the device language"). Pass a language code, optionally with a region, such as \"fr\" or \"pt-BR\".")
+            return false
+        }
+        return userManager.setLanguage(tag)
+    }
+
+    /// A deprecated `UserAttributes.language` becomes the override. Returns whether it changed.
+    /// One warning per launch covers it, an unreadable tag included.
+    private func forwardLegacyLanguage(_ attributes: UserAttributes, to userManager: UserManager) -> Bool {
+        guard let tag = attributes.languageTag else { return false }
+        if Self.legacyLanguageWarnings == 0 {
+            Self.legacyLanguageWarnings += 1
+            Logger.warn("[INTEGRATION] UserAttributes.language is deprecated and no longer sent as an attribute; it now calls setLanguage(_:), and a value that is not a language tag is ignored. Call Encore.shared.setLanguage(\"\(tag)\") instead.")
+        }
+        guard let normalized = LanguageTag.normalizedLegacy(tag) else { return false }
+        return userManager.setLanguage(normalized)
+    }
+
+    /// Refetches /config and offers in the current language and re-identifies,
+    /// so the next presentation and its events follow it.
+    private func applyLanguage(_ userManager: UserManager) {
+        if services?.foregroundGate.isOpen ?? true {
+            remoteConfigManager?.fetch(userId: userManager.currentUserId, sdkVersion: Encore.sdkVersion, language: userManager.language)
+            refetchOffers()
+        }
+        // Triggers start over for the new language whatever the gate: each loads on its own appearance.
+        TriggerIdentityChange.post()
+        analyticsClient?.identifyUser(userId: userManager.currentUserId, attributes: userManager.userAttributes)
     }
 
     /// Clears user data and generates a new anonymous ID. Call on logout.
@@ -320,21 +439,38 @@ public final class Encore: EncoreProtocol {
         sduiConfigManager?.clearForcedFallback()
         services?.offers.clearCache()
         entitlementsManager.reset()
-        // A pending strict claim must not follow the next user.
+        // A pending strict claim must not follow the next user, nor may the claim log.
         strictUnlockReconciler?.clearPending()
+        ClaimLog.shared.clear(userId: userManager.currentUserId)
+        ClaimStatusCheck.shared.clear()
+        ReminderWindowStore.shared.clear()
+        TriggerNotShownRecords.clear()
+        GiftsButtonTally.live.clear()
         let newUserId = userManager.reset()
+        TriggerIdentityChange.post()
 
-        // Reset clears stored attributes too, so language reverts to nil here —
-        // the next fetch falls back to the device's Accept-Language header.
-        remoteConfigManager.fetch(
-            userId: newUserId,
-            sdkVersion: Encore.sdkVersion,
-            language: userManager.userAttributes.language
-        )
+        // The language override is the app's, not the user's: it survives reset.
+        if services?.foregroundGate.isOpen ?? true {
+            remoteConfigManager.fetch(
+                userId: newUserId,
+                sdkVersion: Encore.sdkVersion,
+                language: userManager.language
+            )
+        }
         analyticsClient.identifyUser(userId: newUserId, attributes: UserAttributes())
         errorsClient.setUserId(newUserId)
     }
     
+    // MARK: - Publisher Reward
+
+    /// The daily limit Encore's server applies to a placement's ``PublisherReward``.
+    /// A property rather than a `configure` option, so prebuilt bridges keep
+    /// linking; set it any time before `show()`. Survives `reset()`.
+    public var publisherRewardPolicy = PublisherRewardPolicy()
+
+    /// Campaigns each user said they finished, hidden from their lists on this device.
+    internal var selfReportedCampaigns = SelfReportedCampaigns()
+
     // MARK: - Outcomes Stream
 
     /// Active outcome-stream subscribers. A bare AsyncStream is
@@ -379,6 +515,11 @@ public final class Encore: EncoreProtocol {
 
     /// Creates a placement builder for presenting offers.
     public func placement(_ id: String? = nil) -> any PlacementBuilderProtocol {
+        makePlacementBuilder(id)
+    }
+
+    /// The concrete builder behind `placement(_:)`, for SDK-internal callers.
+    internal func makePlacementBuilder(_ id: String?) -> PlacementBuilder {
         // The generated id is LOCAL identity only (the outcomes stream, the
         // host's PurchaseRequest) — it never goes on the wire (2026-08-14
         // reversal): analytics and /offers/search carry only a publisher-chosen
@@ -403,6 +544,11 @@ public final class Encore: EncoreProtocol {
             Logger.error(.integration(.notConfigured), context: .configuration)
             return
         }
+        // A warm requested in the background waits for the app to become active, like the launch one.
+        services?.foregroundGate.runWhenOpen { [weak self] in self?.startPrefetch(placementLabel: placementLabel, useCase: useCase) }
+    }
+
+    private func startPrefetch(placementLabel: String?, useCase: UseCase) {
         #if DEBUG
         Self.prefetchObserverForTesting?(placementLabel, useCase)
         #endif
@@ -420,13 +566,15 @@ public final class Encore: EncoreProtocol {
                 for: useCase,
                 userId: services.user.currentUserId,
                 sdkVersion: Encore.sdkVersion,
-                language: services.user.userAttributes.language
+                language: services.user.language
             )
             services.offers.prefetch(
                 userId: services.user.currentUserId,
-                attributes: services.user.userAttributes,
+                attributes: services.user.requestAttributes,
                 variantId: services.sduiConfigManager.variantId(for: useCase),
-                placementId: placementLabel
+                placementId: placementLabel,
+                useCase: useCase,
+                cachePlacementId: services.remoteConfigManager.cachePlacement(for: placementLabel)
             )
         }
     }

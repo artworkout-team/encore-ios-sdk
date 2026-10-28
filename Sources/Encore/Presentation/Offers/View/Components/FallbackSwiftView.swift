@@ -79,7 +79,7 @@ struct FallbackOfferSheetView: View {
             )
             
             CarouselView(
-                offers: viewModel.offerResponse.offerList,
+                offers: viewModel.visibleOffers,
                 currentIndex: $viewModel.currentOfferIndex,
                 offerContext: viewModel.offerContext,
                 isClaimDisabled: isClaimDisabled,
@@ -89,10 +89,10 @@ struct FallbackOfferSheetView: View {
             .padding(.top, 20)
             
             // Page indicators centered between carousel and bottom
-            if viewModel.offerResponse.offerCount > 1 {
+            if viewModel.visibleOffers.count > 1 {
                 Spacer()
                 CompactPageIndicator(
-                    totalPages: viewModel.offerResponse.offerCount,
+                    totalPages: viewModel.visibleOffers.count,
                     currentPage: viewModel.currentOfferIndex ?? 0,
                     activeColor: accentColor,
                     inactiveColor: OfferSheetStyles.indicatorGray
@@ -129,13 +129,14 @@ struct SheetHeaderView: View {
                         .font(OfferSheetStyles.closeButtonFont)
                         .foregroundColor(OfferSheetStyles.closeButtonGray)
                 }
+                .accessibilityLabel(Text(verbatim: offerContext.strings[.modalClose]))
                 .padding(.trailing, 16)
                 .padding(.top, 2)
             }
             
             // Title and Subtitle
             VStack(alignment: .leading, spacing: 8) {
-                copy.headline.reduce(Text("")) { text, run in
+                copy.headline.reduce(Text(verbatim: "")) { text, run in
                     text + Text(run.text)
                         .foregroundColor(run.isHighlighted ? accentTitleColor : OfferSheetStyles.primaryText)
                 }
@@ -179,17 +180,24 @@ struct SheetHeaderCopy: Equatable {
     /// template branches on it, so no default is invented here.
     let subheadline: String?
 
-    init(offerContext: OfferContext) {
+    /// Churn priority: host copy > dashboard copy > shipped default.
+    init(offerContext: OfferContext, strings: SDKStrings? = nil) {
+        let strings = strings ?? offerContext.strings
         switch offerContext.useCase {
         case .reduceChurn:
-            var accent = offerContext.accentTitleText ?? " for free"
-            if !accent.isEmpty, !accent.hasPrefix(" ") { accent = " " + accent }
-            headline = [
-                SDUIInlineMarkup.Run(text: offerContext.titleText ?? "Get 1 month", isHighlighted: false),
-                SDUIInlineMarkup.Run(text: accent, isHighlighted: true),
-            ]
-            subheadline = offerContext.subtitleText
-                ?? "Claim an exclusive offer and get free access to all features"
+            if let headline = offerContext.churnHeadlineOverride {
+                self.headline = SDUIInlineMarkup.parse(headline)
+            } else {
+                var accent = offerContext.accentTitleText ?? strings[.fallbackHeadlineAccent]
+                if !accent.isEmpty, !accent.hasPrefix(" ") { accent = " " + accent }
+                self.headline = [
+                    SDUIInlineMarkup.Run(text: offerContext.titleText ?? strings[.fallbackHeadline], isHighlighted: false),
+                    SDUIInlineMarkup.Run(text: accent, isHighlighted: true),
+                ]
+            }
+            subheadline = offerContext.churnSubheadlineOverride
+                ?? offerContext.subtitleText
+                ?? strings[.fallbackSubheadline]
         case .rewardUsers:
             headline = SDUIInlineMarkup.parse(offerContext.headlineText ?? "")
             let sub = offerContext.subheadlineText
@@ -217,7 +225,7 @@ struct InstructionsView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(instructions, id: \.title) { instruction in
                             HStack(alignment: .top, spacing: 8) {
-                                Text("•")
+                                Text(verbatim: "•")
                                     .font(.system(size: 14, weight: .regular))
                                     .foregroundColor(OfferSheetStyles.primaryText)
                                 Text(instruction.title)

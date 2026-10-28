@@ -75,12 +75,17 @@ internal struct Instruction {
     let title: String
     let subtitle: String
     let ctaButtonText: String?
+    /// An http(s) image for this step, nil when it has none or the link is not one this SDK can load.
+    let imageUrl: String?
+    /// 1-based place in the offer's steps, set by the `instructions` loop.
+    var position: Int?
     
     /// Direct initializer for programmatic construction
-    init(title: String, subtitle: String, ctaButtonText: String? = nil) {
+    init(title: String, subtitle: String, ctaButtonText: String? = nil, imageUrl: String? = nil) {
         self.title = title
         self.subtitle = subtitle
         self.ctaButtonText = ctaButtonText
+        self.imageUrl = Self.imageLink(imageUrl)
     }
     
     /// Initialize from DTO
@@ -88,6 +93,15 @@ internal struct Instruction {
         self.title = dto.title
         self.subtitle = dto.subtitle
         self.ctaButtonText = dto.ctaButtonText
+        self.imageUrl = Self.imageLink(dto.imageUrl)
+    }
+
+    /// Blank or a non-http(s) scheme is ABSENT, so `hasInstructionImage` never opens on an image that cannot load.
+    private static func imageLink(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty,
+              let scheme = URL(string: trimmed)?.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return nil }
+        return trimmed
     }
 }
 

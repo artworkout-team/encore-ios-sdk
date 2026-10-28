@@ -2,7 +2,7 @@
 //
 // File-based storage for the outbox queue.
 // Each job is stored as a separate JSON file for memory efficiency.
-// Files are named by timestamp for natural FIFO ordering.
+// Files are named by an enqueue sequence, so delivery order is enqueue order.
 
 import Foundation
 
@@ -10,7 +10,7 @@ import Foundation
 
 /// File-based storage for outbox jobs.
 /// - Jobs are stored as individual JSON files (zero memory footprint when not processing)
-/// - File naming uses timestamp + UUID for natural FIFO ordering
+/// - File naming uses sequence + UUID, so delivery order is enqueue order
 /// - Automatic eviction enforces storage limits
 internal final class OutboxStorage: @unchecked Sendable {
     
@@ -29,6 +29,10 @@ internal final class OutboxStorage: @unchecked Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let queue: DispatchQueue
+    /// Serializes numbering and writing across EVERY instance: the configured
+    /// outbox and `UnconfiguredOutbox` each hold one on the same directory, on
+    /// their own queues.
+    private static let writeLock = NSLock()
     
     // MARK: - Init
     
@@ -54,6 +58,11 @@ internal final class OutboxStorage: @unchecked Sendable {
         }
         
         try? fileManager.createDirectory(at: self.directory, withIntermediateDirectories: true)
+        queue.sync {
+            Self.writeLock.lock()
+            defer { Self.writeLock.unlock() }
+            moveHandshakesFirst()
+        }
         Logger.debug("OutboxStorage: Initialized at: \(self.directory.path)")
     }
     
@@ -64,9 +73,14 @@ internal final class OutboxStorage: @unchecked Sendable {
     @discardableResult
     func enqueue(_ job: OutboxJob) -> Bool {
         queue.sync {
-            // Generate filename: timestamp-uuid.json (for FIFO ordering)
-            let timestamp = Int(job.createdAt.timeIntervalSince1970 * 1000)
-            let filename = "\(timestamp)-\(job.id).json"
+            Self.writeLock.lock()
+            defer { Self.writeLock.unlock() }
+            // sequence-uuid.json. The sequence is the creation millisecond, but
+            // never at or below the last one handed out, so neither a job
+            // created in the same millisecond nor a clock moved back can sort
+            // an identify alias ahead of the handshake that creates its user.
+            let sequence = nextSequence(after: Int64(job.createdAt.timeIntervalSince1970 * 1000))
+            let filename = "\(sequence)-\(job.id).json"
             let fileURL = directory.appendingPathComponent(filename)
             
             // Write atomically (temp file + move)
@@ -146,12 +160,48 @@ internal final class OutboxStorage: @unchecked Sendable {
     
     // MARK: - Private Helpers
     
-    /// Get all job filenames sorted by name (oldest first due to timestamp prefix).
+    /// Job filenames in enqueue order: by numeric sequence prefix, then name.
+    /// Files written before the sequence carry their creation millisecond in
+    /// the same place, so they keep their order.
     private func sortedFilenames() -> [String] {
         let contents = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
-        return contents.filter { $0.hasSuffix(".json") }.sorted()
+        return contents.filter { $0.hasSuffix(".json") }.sorted { a, b in
+            let (sa, sb) = (Self.sequence(of: a), Self.sequence(of: b))
+            return sa != sb ? sa < sb : a < b
+        }
+    }
+
+    /// Continues after the newest job on disk, read fresh each time so another
+    /// instance's jobs and a restart both count.
+    private func nextSequence(after candidate: Int64) -> Int64 {
+        guard let last = sortedFilenames().last.map(Self.sequence(of:)) else { return candidate }
+        return max(candidate, last + 1)
+    }
+
+    private static func sequence(of filename: String) -> Int64 {
+        Int64(filename.prefix { $0 != "-" }) ?? 0
     }
     
+    /// Renumbers `POST /users` handshakes ahead of every other job, keeping each group's order.
+    /// Enqueue order already does this; it repairs a queue saved by an older build, where an
+    /// identify could sort ahead of the handshake that creates its user.
+    private func moveHandshakesFirst() {
+        let filenames = sortedFilenames()
+        let isHandshake = filenames.map { name in
+            loadJob(filename: name).map { $0.request.path == "users" && $0.request.method == "POST" } ?? false
+        }
+        guard let firstOther = isHandshake.firstIndex(of: false),
+              isHandshake[firstOther...].contains(true),
+              let head = filenames.first.map(Self.sequence(of:)) else { return }
+        let handshakes = zip(filenames, isHandshake).filter(\.1).map(\.0)
+        guard head > Int64(handshakes.count) else { return }
+        for (offset, name) in handshakes.enumerated() {
+            let rest = name.drop { $0 != "-" }
+            let renamed = "\(head - Int64(handshakes.count - offset))\(rest)"
+            try? fileManager.moveItem(at: directory.appendingPathComponent(name), to: directory.appendingPathComponent(renamed))
+        }
+    }
+
     /// Load a job from a file.
     private func loadJob(filename: String) -> OutboxJob? {
         let fileURL = directory.appendingPathComponent(filename)

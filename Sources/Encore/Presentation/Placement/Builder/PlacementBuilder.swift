@@ -77,14 +77,45 @@ public protocol PlacementBuilderProtocol {
     /// Same priority and empty-string rules as ``headline(_:)``.
     func subheadline(_ text: String) -> Self
 
+    /// Overrides the primary button's label, on ``UseCase/rewardUsers`` only.
+    /// Same priority and empty-string rules as ``headline(_:)``. On
+    /// ``UseCase/reduceChurn`` the call is accepted and has no effect: no
+    /// paywall template reads a button label yet.
+    func cta(_ text: String) -> Self
+
+    /// Overrides the decline button's label. Same rules as ``cta(_:)``,
+    /// including the no-op on ``UseCase/reduceChurn``.
+    func decline(_ text: String) -> Self
+
+    /// Overrides the badge on the highlighted offer. Same rules as
+    /// ``cta(_:)``, including the no-op on ``UseCase/reduceChurn``.
+    func badge(_ text: String) -> Self
+
     /// Sets brand colours for this presentation, as the web SDK's `appearance` option.
     /// Last call wins; unset fields keep the sheet's defaults.
     func appearance(_ config: AppearanceConfig) -> Self
+
+    /// Describes the prize your app pays for trying an offer. When the served variant
+    /// asks "Did you finish?", the user says yes and Encore's server grants it, the
+    /// result's `claim?.userConfirmedCompletion` is true: grant it then. Identified users only.
+    /// When the app's reward settings pay on verification the flag stays false; the
+    /// `offer_completed` webhook's `reward` pays instead, once per `transactionId`.
+    func publisherReward(_ reward: PublisherReward) -> Self
 }
 
 public extension PlacementBuilderProtocol {
     /// Conformers that predate this requirement ignore appearance.
     func appearance(_ config: AppearanceConfig) -> Self { self }
+
+    /// Conformers that predate this requirement pass no prize.
+    func publisherReward(_ reward: PublisherReward) -> Self { self }
+
+    /// Conformers that predate these keep the wording the backend serves.
+    /// Defaults rather than bare requirements: a requirement added to a public
+    /// protocol breaks every conformer outside this repo.
+    func cta(_ text: String) -> Self { self }
+    func decline(_ text: String) -> Self { self }
+    func badge(_ text: String) -> Self { self }
 
     func show(resume: @escaping @Sendable (PresentationResult) -> Void) {
         Task { @MainActor in
@@ -136,10 +167,19 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
     private var selectedUseCase: UseCase = .reduceChurn
     private var headlineOverride: String?
     private var subheadlineOverride: String?
+    private var ctaOverride: String?
+    private var declineOverride: String?
+    private var badgeOverride: String?
     /// Readable for tests; set only through `appearance(_:)`.
     internal private(set) var appearanceOverride: AppearanceConfig?
+    /// Readable for tests; set only through `publisherReward(_:)`.
+    internal private(set) var resolvedPublisherReward: PublisherReward?
 
     private var onLoadingStateChangeCallback: (@Sendable (Bool) -> Void)?
+    /// Set by a trigger that opens this sheet and attributes its tap to it.
+    internal private(set) var suppliedPresentationId: String?
+    /// Cancelling the calling task while the sheet still loads aborts it. Triggers' auto pops only.
+    internal private(set) var cancelsWithTask = false
 
     internal init(id: String, label: String? = nil) {
         self.id = id
@@ -159,7 +199,10 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
             placementLabel: label,
             useCase: selectedUseCase,
             copyOverrides: copyOverrides,
-            appearance: appearanceOverride
+            appearance: appearanceOverride,
+            publisherReward: resolvedPublisherReward,
+            presentationId: suppliedPresentationId,
+            cancelsWithTask: cancelsWithTask
         )
         Logger.info(.presentation, "show(\(id)) → \(result) | advertiser=\(String(describing: result.advertiser)) publisher=\(String(describing: result.publisher))")
         return result
@@ -177,6 +220,7 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
             useCase: selectedUseCase,
             copyOverrides: copyOverrides,
             appearance: appearanceOverride,
+            publisherReward: resolvedPublisherReward,
             resume: resume
         )
         Logger.info(.presentation, "makeViewController(\(id)) → \(controller == nil ? "not built" : "ready")")
@@ -192,6 +236,22 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
         return copy
     }
 
+    /// Presents under `id` instead of a fresh one, so the trigger whose tap opened
+    /// this sheet can put the same id on its tap event. Internal: triggers only.
+    func presentationId(_ id: String) -> PlacementBuilder {
+        var copy = self
+        copy.suppliedPresentationId = id
+        return copy
+    }
+
+    /// Aborts the sheet if the calling task is cancelled before it shows; once on screen it
+    /// stays. Internal: a trigger's auto pop, which must not open for a mount that is gone.
+    func cancellingWithTask() -> PlacementBuilder {
+        var copy = self
+        copy.cancelsWithTask = true
+        return copy
+    }
+
     func headline(_ text: String) -> PlacementBuilder {
         var copy = self
         copy.headlineOverride = text
@@ -204,9 +264,33 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
         return copy
     }
 
+    func cta(_ text: String) -> PlacementBuilder {
+        var copy = self
+        copy.ctaOverride = text
+        return copy
+    }
+
+    func decline(_ text: String) -> PlacementBuilder {
+        var copy = self
+        copy.declineOverride = text
+        return copy
+    }
+
+    func badge(_ text: String) -> PlacementBuilder {
+        var copy = self
+        copy.badgeOverride = text
+        return copy
+    }
+
     func appearance(_ config: AppearanceConfig) -> PlacementBuilder {
         var copy = self
         copy.appearanceOverride = config
+        return copy
+    }
+
+    func publisherReward(_ reward: PublisherReward) -> PlacementBuilder {
+        var copy = self
+        copy.resolvedPublisherReward = reward
         return copy
     }
 
@@ -235,14 +319,20 @@ internal struct PlacementBuilder: PlacementBuilderProtocol {
     ///
     /// Resolved at `show()` time rather than inside `headline(_:)` so the chain
     /// is order-independent: `.headline(…).useCase(.rewardUsers)` and
-    /// `.useCase(.rewardUsers).headline(…)` produce the same map.
+    /// `.useCase(.rewardUsers).headline(…)` produce the same map. Blank is
+    /// absent, so dashboard or backstop copy still renders.
     internal var copyOverrides: [String: String] {
+        let pairs: [(String?, String)] = [
+            (headlineOverride, selectedUseCase.headlineVariable),
+            (subheadlineOverride, selectedUseCase.subheadlineVariable),
+            (ctaOverride, selectedUseCase.ctaVariable),
+            (declineOverride, selectedUseCase.declineVariable),
+            (badgeOverride, selectedUseCase.badgeVariable),
+        ]
         var overrides: [String: String] = [:]
-        if let headlineOverride, !headlineOverride.isEmpty {
-            overrides[selectedUseCase.headlineVariable] = headlineOverride
-        }
-        if let subheadlineOverride, !subheadlineOverride.isEmpty {
-            overrides[selectedUseCase.subheadlineVariable] = subheadlineOverride
+        for (text, variable) in pairs {
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            overrides[variable] = text
         }
         return overrides
     }

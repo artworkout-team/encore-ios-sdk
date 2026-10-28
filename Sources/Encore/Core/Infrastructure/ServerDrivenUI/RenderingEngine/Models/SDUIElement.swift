@@ -50,6 +50,12 @@ struct SDUIText: Decodable {
     /// are only consumed when there is a color to apply.
     var highlightColor: SDUIColor?
     var style: SDUIStyle?
+    /// Ticking time text (trigger mounts). When set, `text` is ignored.
+    var countdown: SDUICountdown?
+    /// Shrinks to fit one line, down to this factor, before truncating.
+    var minimumScaleFactor: CGFloat?
+    /// Trigger trees: texts sharing this key shrink by one factor and keep their relative sizes.
+    var scaleGroup: String?
 
     // For dynamic text that references context data
     var textBinding: SDUITextBinding?
@@ -69,8 +75,17 @@ struct SDUIText: Decodable {
     /// Unlike textMapKey (server-side lookup tables) or template variables (OfferContext),
     /// this reads from the mutable state machine values dictionary.
     var valueKey: String?
+    /// A key into the offer's `displayProperties`, e.g. "eligibilityNote". Row-scoped:
+    /// inside a `forEach` it reads THAT row. Empty when the offer carries no such key,
+    /// so pair it with `hasOfferProperty`.
+    ///
+    /// A variant using this must still author `"text": ""`. `text` is required, so
+    /// omitting it fails the whole variant, and an SDK that predates this key ignores it
+    /// and renders `text`, so anything else there prints under every offer on every
+    /// older install.
+    var propertyKey: String?
 
-    init(text: String = "", font: SDUIFont? = nil, color: SDUIColor? = nil, alignment: SDUIAlignment? = nil, lineSpacing: CGFloat? = nil, lineHeight: CGFloat? = nil, lineLimit: Int? = nil, multilineAlignment: SDUIAlignment? = nil, style: SDUIStyle? = nil, textBinding: SDUITextBinding? = nil, segments: [SDUITextSegment]? = nil, textMapKey: String? = nil, textMapValueKey: String? = nil, valueKey: String? = nil) {
+    init(text: String = "", font: SDUIFont? = nil, color: SDUIColor? = nil, alignment: SDUIAlignment? = nil, lineSpacing: CGFloat? = nil, lineHeight: CGFloat? = nil, lineLimit: Int? = nil, multilineAlignment: SDUIAlignment? = nil, style: SDUIStyle? = nil, textBinding: SDUITextBinding? = nil, segments: [SDUITextSegment]? = nil, textMapKey: String? = nil, textMapValueKey: String? = nil, valueKey: String? = nil, propertyKey: String? = nil) {
         self.text = text
         self.font = font
         self.color = color
@@ -85,12 +100,15 @@ struct SDUIText: Decodable {
         self.textMapKey = textMapKey
         self.textMapValueKey = textMapValueKey
         self.valueKey = valueKey
+        self.propertyKey = propertyKey
     }
 }
 
 /// A segment of styled text for concatenation
 struct SDUITextSegment: Decodable {
     var text: String
+    /// A key into the offer's `displayProperties`. Same rules as `SDUIText.propertyKey`.
+    var propertyKey: String?
     var font: SDUIFont?
     var color: SDUIColor?
     
@@ -121,6 +139,8 @@ enum SDUITextBinding: String, Decodable {
     case instructionSubtitle
     /// Empty on a step that carries no button copy, which most do not.
     case instructionCtaText
+    /// The step's 1-based place in the offer's steps, so a variant can number them.
+    case instructionNumber
 }
 
 // MARK: - Image Elements
@@ -141,6 +161,8 @@ struct SDUIAsyncImage: Decodable {
     var contentMode: SDUIContentMode?
     var placeholderColor: SDUIColor?
     var style: SDUIStyle?
+    /// Shown while loading, when `url` resolves empty, and on a load error.
+    var fallback: SDUIElement?
 }
 
 /// Renders the host app's bundle icon in place. No network, no async — the
@@ -164,6 +186,8 @@ enum SDUICreativeBinding: String, Decodable {
     /// The campaign hero, falling back to the creative image. Does NOT fire the
     /// impression: `offerPrimaryCreative` stays the one probe.
     case offerHeroImage
+    /// The image of the step an `instructions` loop is on. Empty outside one.
+    case instructionImage
 }
 
 enum SDUIContentMode: String, Decodable {
@@ -184,6 +208,11 @@ struct SDUIButton: Decodable {
     let action: SDUIAction
     var style: SDUIStyle?
     var disabled: Bool?
+    /// Spoken label and hint; a trigger tree sets them from `${...}` copy.
+    var accessibilityLabel: String?
+    var accessibilityHint: String?
+    /// Press feedback (scale, eased).
+    var pressedStyle: SDUIPressedStyle?
     /// Seconds the button must be HELD before `action` fires. Absent means a
     /// plain tap, which is every button shipped today.
     ///
@@ -316,6 +345,8 @@ enum SDUIShapeType: String, Decodable {
     case roundedRectangle
     case circle
     case capsule
+    /// Fills its frame, non-square allowed.
+    case ellipse
 }
 
 struct SDUIShape: Decodable {
@@ -323,6 +354,9 @@ struct SDUIShape: Decodable {
     var cornerRadius: CGFloat?
     var fillColor: SDUIColor?
     var style: SDUIStyle?
+    /// A stroke drawn inside the frame.
+    var strokeColor: SDUIColor?
+    var strokeWidth: CGFloat?
 }
 
 enum SDUIGradientDirection: String, Decodable {
@@ -352,8 +386,35 @@ enum SDUIGradientDirection: String, Decodable {
 
 struct SDUIGradient: Decodable {
     let colors: [SDUIColorStop]
+    /// Required for a linear gradient, exactly as before; a radial one has none.
     let direction: SDUIGradientDirection
     var style: SDUIStyle?
+    var type: SDUIGradientType?
+    var startRadius: CGFloat?
+    var endRadius: CGFloat?
+
+    private enum CodingKeys: String, CodingKey { case colors, direction, style, type, startRadius, endRadius }
+
+    init(colors: [SDUIColorStop], direction: SDUIGradientDirection, style: SDUIStyle? = nil) {
+        self.colors = colors
+        self.direction = direction
+        self.style = style
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        colors = try container.decode([SDUIColorStop].self, forKey: .colors)
+        style = try container.decodeIfPresent(SDUIStyle.self, forKey: .style)
+        type = try container.decodeIfPresent(SDUIGradientType.self, forKey: .type)
+        startRadius = try container.decodeIfPresent(CGFloat.self, forKey: .startRadius)
+        endRadius = try container.decodeIfPresent(CGFloat.self, forKey: .endRadius)
+        // A radial gradient is centred, so it has no direction; a linear one still requires it.
+        if type == .radial {
+            direction = try container.decodeIfPresent(SDUIGradientDirection.self, forKey: .direction) ?? .topToBottom
+        } else {
+            direction = try container.decode(SDUIGradientDirection.self, forKey: .direction)
+        }
+    }
 }
 
 struct SDUIColorStop: Decodable {
@@ -469,6 +530,8 @@ enum SDUIScrollAlignment: String, Decodable {
 struct SDUIForEach: Decodable {
     let dataSource: SDUIDataSource
     let itemTemplate: SDUIElement
+    /// The host list to loop over, with `dataSource: hostList`.
+    var list: String?
     var limit: Int?
     /// How many rows to SKIP before the first one rendered. Absent means none.
     ///
@@ -508,7 +571,7 @@ struct SDUIForEach: Decodable {
     var impressionProbe: SDUIImpressionProbe?
 
     private enum CodingKeys: String, CodingKey {
-        case dataSource, itemTemplate, limit, offset, columns, gridSpacing, style, impressionProbe, filter
+        case dataSource, list, itemTemplate, limit, offset, columns, gridSpacing, style, impressionProbe, filter
     }
 
     /// Hand-written for one reason: an unrecognised `impressionProbe` decodes as
@@ -522,6 +585,7 @@ struct SDUIForEach: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         dataSource = try container.decode(SDUIDataSource.self, forKey: .dataSource)
+        list = try container.decodeIfPresent(String.self, forKey: .list)
         itemTemplate = try container.decode(SDUIElement.self, forKey: .itemTemplate)
         limit = try container.decodeIfPresent(Int.self, forKey: .limit)
         offset = try container.decodeIfPresent(Int.self, forKey: .offset)
@@ -612,6 +676,9 @@ enum SDUIOfferAttribute: String, Decodable {
     /// The creative's short guidance phrases, nil when it carries none. Read as
     /// text through the `offerQuickInstructions` binding.
     case quickInstructions
+    /// The creative's steps, as their count, nil when it carries none. Gate an
+    /// `instructions` loop on it, so an offer with no steps can draw a fallback.
+    case instructions
 }
 
 /// Which probe observed an offer. Mirrors Android's `SduiImpressionSource`.
@@ -639,6 +706,17 @@ enum SDUIDataSource: String, Decodable {
     /// The scoped offer's own instruction steps, in authored order. Empty when
     /// the creative carries none.
     case instructions
+    /// A list the trigger host supplies (`list` names it). Trigger mounts only.
+    case hostList
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let source = SDUIDataSource(rawValue: raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown data source \(raw)"))
+        }
+        if source == .hostList { try decoder.requireTriggerMount("dataSource hostList") }
+        self = source
+    }
 }
 
 struct SDUIConditional: Decodable {
@@ -744,6 +822,16 @@ indirect enum SDUICondition: Decodable {
     case isLastOffer
     case isMiddleOffer
     case offerIndexEquals(Int)
+    /// True when the scoped offer carries a non-blank `displayProperties` value for this
+    /// key. The gate for any `propertyKey` line.
+    case hasOfferProperty(String)
+    /// True inside an `instructions` loop when the step's subtitle is not blank
+    /// and does not repeat its title. Many creatives copy the title into it.
+    case hasInstructionSubtitle
+    /// True inside an `instructions` loop when the step carries an image.
+    case hasInstructionImage
+    /// True when the host list has at least `min` items (trigger mounts).
+    case listCountAtLeast(list: String, min: Int)
 
     private enum CodingKeys: String, CodingKey {
         case hasMultipleOffers, isCurrentPage, isCurrentPageBinding
@@ -751,8 +839,14 @@ indirect enum SDUICondition: Decodable {
         case hasIntroOffer, hasFreeTrial
         case isSelectedOffer
         case and, or, not, equals
-        case hasOfferAttribute
+        case hasOfferAttribute, hasOfferProperty, hasInstructionSubtitle, hasInstructionImage
         case isFirstOffer, isLastOffer, isMiddleOffer, offerIndexEquals
+        case listCountAtLeast
+    }
+
+    private struct ListCountData: Decodable {
+        let list: String
+        let min: Int
     }
 
     private struct CurrentPageData: Decodable {
@@ -809,6 +903,12 @@ indirect enum SDUICondition: Decodable {
             self = .equals(lhs: data.lhs, rhs: data.rhs)
         } else if let attribute = try? container.decode(SDUIOfferAttribute.self, forKey: .hasOfferAttribute) {
             self = .hasOfferAttribute(attribute)
+        } else if let key = try? container.decode(String.self, forKey: .hasOfferProperty) {
+            self = .hasOfferProperty(key)
+        } else if container.contains(.hasInstructionSubtitle) {
+            self = .hasInstructionSubtitle
+        } else if container.contains(.hasInstructionImage) {
+            self = .hasInstructionImage
         } else if container.contains(.isFirstOffer) {
             self = .isFirstOffer
         } else if container.contains(.isLastOffer) {
@@ -817,6 +917,9 @@ indirect enum SDUICondition: Decodable {
             self = .isMiddleOffer
         } else if let index = try? container.decode(Int.self, forKey: .offerIndexEquals) {
             self = .offerIndexEquals(index)
+        } else if let data = try? container.decode(ListCountData.self, forKey: .listCountAtLeast) {
+            try decoder.requireTriggerMount("listCountAtLeast")
+            self = .listCountAtLeast(list: data.list, min: data.min)
         } else {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown condition type"))
         }
@@ -847,6 +950,8 @@ indirect enum SDUIElement {
     case slideButton(SDUISlideButton)
     case compactPageIndicator(SDUICompactPageIndicator)
     case confetti(SDUIConfetti)
+    case progress(SDUIProgress)
+    case marquee(SDUIMarquee)
     case empty
     
     // Convenience initializers
@@ -868,6 +973,7 @@ extension SDUIElement: Decodable {
         case spacer, shape, gradient, scrollView
         case forEach, conditional, group, textField, toggle, slideButton
         case compactPageIndicator, confetti, empty
+        case progress, marquee
     }
     
     init(from decoder: Decoder) throws {
@@ -929,6 +1035,10 @@ extension SDUIElement: Decodable {
             self = .confetti(config)
         } else if container.contains(.empty) {
             self = .empty
+        } else if container.contains(.progress) {
+            self = .progress(try container.decode(SDUIProgress.self, forKey: .progress))
+        } else if container.contains(.marquee) {
+            self = .marquee(try container.decode(SDUIMarquee.self, forKey: .marquee))
         } else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(

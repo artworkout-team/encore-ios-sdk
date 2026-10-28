@@ -68,6 +68,32 @@ internal extension UseCase {
         }
     }
 
+    /// Template variable that `PlacementBuilder.cta(_:)` overwrites. The churn
+    /// names are reserved, not used: no churn template references them, so an
+    /// override there lands in the dictionary and nothing reads it.
+    var ctaVariable: String {
+        switch self {
+        case .reduceChurn: "customCta"
+        case .rewardUsers: "rewardCta"
+        }
+    }
+
+    /// Template variable that `PlacementBuilder.decline(_:)` overwrites.
+    var declineVariable: String {
+        switch self {
+        case .reduceChurn: "customDecline"
+        case .rewardUsers: "rewardDecline"
+        }
+    }
+
+    /// Template variable that `PlacementBuilder.badge(_:)` overwrites.
+    var badgeVariable: String {
+        switch self {
+        case .reduceChurn: "customBadge"
+        case .rewardUsers: "rewardBadge"
+        }
+    }
+
     /// Whether `/config` needs the `useCase` query parameter.
     ///
     /// Omitted for `.reduceChurn` so the request stays byte-identical to

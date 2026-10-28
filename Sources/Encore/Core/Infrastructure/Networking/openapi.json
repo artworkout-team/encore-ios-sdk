@@ -265,6 +265,11 @@
                             "nullable": true,
                             "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
                           },
+                          "displayProperties": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "Display-only strings a variant renders by key, e.g. {\"eligibilityNote\":\"New subscribers only\"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines."
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -366,12 +371,13 @@
                                   "type": "string",
                                   "format": "uri",
                                   "nullable": true,
-                                  "description": "Optional override for campaign destinationUrl"
+                                  "description": "The campaign's destination, on a served creative; null where not served"
                                 },
                                 "trackingParameters": {
                                   "type": "object",
                                   "additionalProperties": {},
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "The campaign's claim tracking, on a served creative; null where not served"
                                 },
                                 "weight": {
                                   "type": "integer",
@@ -399,6 +405,10 @@
                                       },
                                       "ctaButtonText": {
                                         "type": "string"
+                                      },
+                                      "imageUrl": {
+                                        "type": "string",
+                                        "description": "Optional https image for this step. Absent: the step has none."
                                       }
                                     },
                                     "required": [
@@ -730,7 +740,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -807,14 +821,22 @@
                         "type": "string",
                         "description": "Decimal degrees as string (e.g., \"-122.4194\")"
                       },
+                      "age": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 120,
+                        "description": "Whole years, as an integer. If you hold only a RANGE, send its LOWEST end: \"13-17\" is sent as 13. Under 18 restricts this request to offers rated for that age, with no per-user personalisation. Used for this request only and never stored. Lower than an age stored through /users/attributes, it wins; higher, the stored one does. A fraction is rounded down, also as a decimal string (\"17.9\" is 17), a whole-number string is read as its number, and a range string as its lowest end (\"13-17\" is 13, \"65+\" is 65); any other value is ignored, never a 400."
+                      },
                       "dateOfBirth": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Deprecated: send age instead. A YYYY-MM-DD date, or an ISO 8601 date-time with a zone, is turned into an age for this request only, then discarded; never stored or logged. If age is also sent, the younger of the two is used. An unreadable date is ignored, never a 400."
                       },
                       "gender": {
                         "type": "string"
                       },
                       "language": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale."
                       },
                       "subscriptionTier": {
                         "type": "string"
@@ -885,11 +907,27 @@
                     "maxLength": 64,
                     "description": "Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself."
                   },
+                  "useCase": {
+                    "type": "string",
+                    "enum": [
+                      "churn-intervention",
+                      "post-action-reward"
+                    ],
+                    "description": "Which Encore surface is being filled. Ignored while OFFERS_SEARCH_RESOLVES_SURFACE is off. With it on and no variantId, the server resolves the variant for this use case (and the placementId pin) as GET /config does; a sent variantId always wins. Absent or unrecognised: today's behaviour (churn-intervention). Never a 400."
+                  },
                   "maxPostbackTimeMs": {
                     "type": "integer",
                     "minimum": 1000,
                     "maximum": 120000,
                     "description": "Strict unlock mode: only include campaigns whose postback latency is less than or equal to this value (in milliseconds). Omit for no filtering. Bounded 1000..120000."
+                  },
+                  "publisherRewardDailyLimit": {
+                    "type": "integer",
+                    "description": "Send only when this placement carries the app's own prize for a reward-for-trying Yes: the app's daily prize limit from its SDK configuration (PublisherRewardPolicy), clamped server-side to 1..10. The response then carries publisherRewardPromise. Omit it and nothing changes."
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "description": "Why the client is searching. `purpose: \"prefetch\"` marks a search the SDK runs before any sheet is shown (a GiftsButton or ClaimReminder checking that offers exist). Its result may later back the sheet the user opens with a tap, so it is a served request like any other, not an impression. It is stamped as purpose on sdk_offer_requested so a report can split these out. Any other value is ignored, never a 400. Serving is identical either way."
                   },
                   "context": {
                     "type": "object",
@@ -1067,6 +1105,11 @@
                             "nullable": true,
                             "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
                           },
+                          "displayProperties": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "Display-only strings a variant renders by key, e.g. {\"eligibilityNote\":\"New subscribers only\"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines."
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -1168,12 +1211,13 @@
                                   "type": "string",
                                   "format": "uri",
                                   "nullable": true,
-                                  "description": "Optional override for campaign destinationUrl"
+                                  "description": "The campaign's destination, on a served creative; null where not served"
                                 },
                                 "trackingParameters": {
                                   "type": "object",
                                   "additionalProperties": {},
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "The campaign's claim tracking, on a served creative; null where not served"
                                 },
                                 "weight": {
                                   "type": "integer",
@@ -1201,6 +1245,10 @@
                                       },
                                       "ctaButtonText": {
                                         "type": "string"
+                                      },
+                                      "imageUrl": {
+                                        "type": "string",
+                                        "description": "Optional https image for this step. Absent: the step has none."
                                       }
                                     },
                                     "required": [
@@ -1475,6 +1523,16 @@
                             "nullable": true,
                             "description": "The gift-sheet group this campaign files under: \"Watch & listen\", \"Money\" or \"Everyday\". Derived from `category` by the server so a native chip strip shows what web tabs show without holding the taxonomy map. Always set: an absent, blank or unmapped category files under \"Everyday\", so every offer sits in some group. Whether a strip is worth drawing is the client's call, because only it knows which offers its sheet lists. /offers/search only: web-sdk holds its own copy of the map and groups `category` itself."
                           },
+                          "categoryDisplayName": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "`category` in the response locale, for display only. Group and filter on `category`, which stays English. Null when `category` is null. /offers/search only."
+                          },
+                          "categoryGroupDisplayName": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "`categoryGroup` in the response locale, for display only. Group on `categoryGroup`, which stays English. /offers/search only."
+                          },
                           "rewardConfirmationTime": {
                             "type": "object",
                             "properties": {
@@ -1493,6 +1551,75 @@
                             ],
                             "nullable": true,
                             "description": "Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then."
+                          },
+                          "trackingParameters": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "nullable": true,
+                            "description": "Campaign claim-URL query parameters, keys verbatim (e.g. {\"af_rid\":\"TRANSACTION_ID\"}); equals the served creative's whenever one exists. Always pair it with the offer's destinationUrl, never with a creative's, and never build a claim URL from an absent or empty value. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "ctaText": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign call-to-action text. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign description, localized like creatives. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "instructions": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "title": {
+                                  "type": "string"
+                                },
+                                "subtitle": {
+                                  "type": "string"
+                                },
+                                "ctaButtonText": {
+                                  "type": "string"
+                                },
+                                "imageUrl": {
+                                  "type": "string",
+                                  "description": "Optional https image for this step. Absent: the step has none."
+                                }
+                              },
+                              "required": [
+                                "title",
+                                "subtitle"
+                              ],
+                              "description": "Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows."
+                            },
+                            "nullable": true,
+                            "description": "Campaign step-by-step instructions, same shape as a creative's. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "quickInstructions": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign one-line instructions. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "logoUrl": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign logo override; null means use organization.logoUrl. Plain string, not format: uri, so one bad value cannot fail a whole Android decode. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "title": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign card title. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "subtitle": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign card subtitle. Absent from servers that predate it; null means the campaign has none."
+                          },
+                          "tooltipText": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Campaign tooltip text. Absent from servers that predate it; null means the campaign has none."
                           }
                         },
                         "required": [
@@ -1562,6 +1689,10 @@
                       "type": "string",
                       "description": "Resolved locale served in this response (language-only, e.g. 'es'). Absent on pre-localization responses."
                     },
+                    "publisherRewardPromise": {
+                      "type": "boolean",
+                      "description": "Whether this user is still under the app's daily prize limit (publisherRewardDailyLimit, rolling 24 hours). What counts depends on publisherRewardMode. on_yes (or no mode): prizes granted on a reward-for-trying Yes. on_verified: this user's verified completions that carried a reward, by when they verified; a Yes never grants and never counts, and the reward arrives on the offer_completed webhook. Present only when the request sent publisherRewardDailyLimit. Offers this user already completed or said Yes to are never served, so this answers the daily limit only. Absent (an older backend, or no limit sent) means no promise. Not a grant: in on_yes the self-report's granted answer is final."
+                    },
                     "error": {
                       "type": "string",
                       "nullable": true
@@ -1586,7 +1717,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -1605,7 +1740,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -1624,7 +1763,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -1643,7 +1786,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -1661,7 +1808,7 @@
           "publisher-sdk",
           "offers"
         ],
-        "description": "Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "description": "Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. On the serve path, offers this end user already completed (a confirmed conversion, or a Yes they reported through an Encore SDK) are left out. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1671,7 +1818,7 @@
                   "userId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), and it drives per-user fraud controls (trial caps, retake blocking) at click time. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls)."
+                    "description": "Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), it drives per-user fraud controls (trial caps, retake blocking) at click time, and on the serve path it leaves out offers this user already completed. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls)."
                   },
                   "clientId": {
                     "type": "string",
@@ -1697,6 +1844,10 @@
                   "placementId": {
                     "type": "string",
                     "description": "Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. A per-placement offer rule NEVER applies here. `/offers/catalog` returns inventory rather than a served set, so a rule configured for this label does not select or order what comes back. Scope an inventory pull on your own filters, never on a rule."
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Optional BCP 47 language tag (e.g. \"es\", \"pt-BR\"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE."
                   },
                   "includeAllRegions": {
                     "type": "boolean",
@@ -1780,6 +1931,11 @@
                             "type": "string",
                             "nullable": true,
                             "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
+                          },
+                          "displayProperties": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "Display-only strings a variant renders by key, e.g. {\"eligibilityNote\":\"New subscribers only\"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines."
                           },
                           "rewardConfirmationTime": {
                             "type": "object",
@@ -1897,6 +2053,10 @@
                                       },
                                       "ctaButtonText": {
                                         "type": "string"
+                                      },
+                                      "imageUrl": {
+                                        "type": "string",
+                                        "description": "Optional https image for this step. Absent: the step has none."
                                       }
                                     },
                                     "required": [
@@ -1994,7 +2154,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2013,7 +2177,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2032,7 +2200,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2080,7 +2252,7 @@
                       "language": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es')."
+                        "description": "BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale."
                       },
                       "platform": {
                         "type": "string",
@@ -2090,6 +2262,122 @@
                           "web"
                         ],
                         "description": "Recipient's device platform — drives creative compatibility filtering. Optional: omit for a platform='api' app to receive all eligible offers untrimmed; device-SDK apps always send it. 'api' is not a valid value here."
+                      },
+                      "osVersion": {
+                        "type": "string",
+                        "pattern": "^\\d{1,5}(\\.\\d{1,5}){0,3}$",
+                        "nullable": true,
+                        "description": "Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored."
+                      },
+                      "userAgent": {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "nullable": true,
+                        "description": "The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored."
+                      },
+                      "advertisingId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                        "nullable": true,
+                        "description": "Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent."
+                      },
+                      "limitAdTracking": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true."
+                      },
+                      "doNotTrack": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true."
+                      },
+                      "deviceIp": {
+                        "type": "string",
+                        "maxLength": 45,
+                        "nullable": true,
+                        "description": "Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored."
+                      },
+                      "gdprApplies": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true."
+                      },
+                      "consentString": {
+                        "type": "string",
+                        "maxLength": 8192,
+                        "nullable": true,
+                        "description": "IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored."
+                      },
+                      "gpp": {
+                        "type": "string",
+                        "maxLength": 8192,
+                        "nullable": true,
+                        "description": "IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out."
+                      },
+                      "gppSid": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000
+                        },
+                        "maxItems": 32,
+                        "nullable": true,
+                        "description": "GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out."
+                      },
+                      "usPrivacy": {
+                        "type": "string",
+                        "pattern": "^1[NYny-]{3}$",
+                        "nullable": true,
+                        "description": "IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out."
                       }
                     },
                     "required": [
@@ -2207,7 +2495,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2226,7 +2518,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2245,7 +2541,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2293,7 +2593,7 @@
                       "language": {
                         "type": "string",
                         "minLength": 1,
-                        "description": "BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es')."
+                        "description": "BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale."
                       },
                       "platform": {
                         "type": "string",
@@ -2303,6 +2603,122 @@
                           "web"
                         ],
                         "description": "Recipient's device platform — drives creative compatibility filtering. Optional: omit for a platform='api' app to receive all eligible offers untrimmed; device-SDK apps always send it. 'api' is not a valid value here."
+                      },
+                      "osVersion": {
+                        "type": "string",
+                        "pattern": "^\\d{1,5}(\\.\\d{1,5}){0,3}$",
+                        "nullable": true,
+                        "description": "Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored."
+                      },
+                      "userAgent": {
+                        "type": "string",
+                        "maxLength": 1024,
+                        "nullable": true,
+                        "description": "The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored."
+                      },
+                      "advertisingId": {
+                        "type": "string",
+                        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                        "nullable": true,
+                        "description": "Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent."
+                      },
+                      "limitAdTracking": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true."
+                      },
+                      "doNotTrack": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true."
+                      },
+                      "deviceIp": {
+                        "type": "string",
+                        "maxLength": 45,
+                        "nullable": true,
+                        "description": "Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored."
+                      },
+                      "gdprApplies": {
+                        "anyOf": [
+                          {
+                            "type": "boolean",
+                            "nullable": true
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              0
+                            ]
+                          },
+                          {
+                            "type": "number",
+                            "enum": [
+                              1
+                            ]
+                          }
+                        ],
+                        "description": "OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true."
+                      },
+                      "consentString": {
+                        "type": "string",
+                        "maxLength": 8192,
+                        "nullable": true,
+                        "description": "IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored."
+                      },
+                      "gpp": {
+                        "type": "string",
+                        "maxLength": 8192,
+                        "nullable": true,
+                        "description": "IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out."
+                      },
+                      "gppSid": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000
+                        },
+                        "maxItems": 32,
+                        "nullable": true,
+                        "description": "GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out."
+                      },
+                      "usPrivacy": {
+                        "type": "string",
+                        "pattern": "^1[NYny-]{3}$",
+                        "nullable": true,
+                        "description": "IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out."
                       }
                     },
                     "required": [
@@ -2427,6 +2843,11 @@
                             "nullable": true,
                             "description": "https link to the advertiser offer terms. Null or absent: render terms copy as plain text."
                           },
+                          "displayProperties": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "Display-only strings a variant renders by key, e.g. {\"eligibilityNote\":\"New subscribers only\"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines."
+                          },
                           "category": {
                             "type": "string",
                             "nullable": true,
@@ -2445,6 +2866,10 @@
                                 },
                                 "ctaButtonText": {
                                   "type": "string"
+                                },
+                                "imageUrl": {
+                                  "type": "string",
+                                  "description": "Optional https image for this step. Absent: the step has none."
                                 }
                               },
                               "required": [
@@ -2514,7 +2939,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2533,7 +2962,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2552,7 +2985,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2642,7 +3079,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2661,7 +3102,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2680,7 +3125,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2698,7 +3147,7 @@
           "publisher-sdk",
           "transactions"
         ],
-        "description": "Create a new transaction for a specific campaign",
+        "description": "Create a new transaction for a specific campaign. 409 with code 'offerAlreadyCompleted' when this user already completed the offer, or said Yes to it through a self-report: drop the offer from the list rather than retrying. The app-wide trial-limit 409 carries no code.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2720,6 +3169,11 @@
                       "post-action-reward"
                     ],
                     "description": "Which Encore surface the user claimed from. Persisted on the transaction so the server-side completion — which is built from that row alone and carries no client context — can be split by use case, along with the payout booked on it. Absent means 'churn-intervention'."
+                  },
+                  "variantId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The id of the variant whose remote template rendered this sheet. Absent when the embedded floor rendered. A per-offer reward is frozen on the transaction only when this variant shows per-offer reward values; absent, malformed or unknown means none is frozen. Never a 400."
                   }
                 },
                 "required": [
@@ -2782,7 +3236,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2801,7 +3259,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2820,7 +3282,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2839,7 +3305,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2858,7 +3328,201 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publisher/sdk/v1/transactions/preload": {
+      "post": {
+        "tags": [
+          "publisher-sdk",
+          "transactions"
+        ],
+        "description": "Reserve the transaction id to substitute for TRANSACTION_ID when preloading an offer link before the claim tap. Not a claim: nothing is counted, stamped or frozen until POST /transactions, which returns this same id when it comes within 30 minutes of the last preload. Send the claim's body. 409 with code 'preloadUnsupported' when this offer's link must not be loaded before a tap; 409 'offerAlreadyCompleted' and the trial-limit 409 as on the claim. Treat any non-200 as no preload.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "campaignId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "userId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "useCase": {
+                    "type": "string",
+                    "enum": [
+                      "churn-intervention",
+                      "post-action-reward"
+                    ],
+                    "description": "Accepted so the claim's body can be sent unchanged; ignored. The claim stamps it."
+                  },
+                  "variantId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Accepted so the claim's body can be sent unchanged; ignored. Never a 400."
+                  }
+                },
+                "required": [
+                  "campaignId",
+                  "userId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "transactionId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The id to substitute for TRANSACTION_ID in the preloaded offer link. The claim returns the same id when it comes within 30 minutes of the last preload; any other id means discard the preload."
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "transactionId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2944,7 +3608,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2963,7 +3631,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -2982,7 +3654,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3001,7 +3677,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3020,7 +3700,202 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/publisher/sdk/v1/transactions/{transactionId}/self-report": {
+      "post": {
+        "tags": [
+          "publisher-sdk",
+          "transactions"
+        ],
+        "description": "Record that the user answered \"Yes, I completed it\" to a reward-for-trying offer, and decide whether the app may grant its own prize. Send it on EVERY tapped Yes, prize or not: the Yes is stored per person (the app's user id), so the offer is hidden from that person on every surface and a re-claim is refused (409 offerAlreadyCompleted), including after a reinstall or on a second device. granted is true only for the first Yes per person per offer, while the person is under the app's daily limit (a rolling 24 hours). Treat no answer as no prize. Idempotent on reportId. Never changes the transaction: no status, payout, entitlement or webhook. 404 when the transaction does not belong to this app, or userId is not the current user id of the person who claimed it. The server cannot tell an identified user from an SDK-generated anonymous id: an app that wants prizes kept to signed-in users must gate the promise client-side.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The SDK's CURRENT user id at the moment the report is sent (not the id captured when the user tapped Yes). Must equal the current app user id of the user who owns the transaction, or the request is a 404."
+                  },
+                  "reportId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Minted once per tapped Yes and reused on every retry of that Yes, with the same body. A retry gets the same granted. On a refused Yes the server keeps only that no prize was granted, so the retry's reason is derived from the retry's own body (daily_cap when it carries publisherRewardId, else no_prize): resend the body unchanged."
+                  },
+                  "publisherRewardId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Present only when a prize was promised for this Yes. Absent: the Yes is still recorded (the offer is hidden and cannot be re-claimed) and granted is false with reason no_prize."
+                  },
+                  "dailyLimit": {
+                    "type": "integer",
+                    "description": "The app's daily prize limit from its SDK configuration. Required when publisherRewardId is present. Clamped server-side to 1..10."
+                  }
+                },
+                "required": [
+                  "userId",
+                  "reportId"
+                ]
+              }
+            }
+          },
+          "required": true
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "in": "path",
+            "name": "transactionId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "granted": {
+                      "type": "boolean",
+                      "description": "Whether the app may grant its prize for this Yes. True only for the first Yes per person per offer, under the daily limit. The ONLY source of prize eligibility: no answer (timeout, offline, 5xx, 404) means no prize."
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "per_offer",
+                        "daily_cap",
+                        "no_prize",
+                        "pays_on_verification"
+                      ],
+                      "description": "Present when granted is false."
+                    },
+                    "reportedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "When the server recorded this person's Yes for this offer (the first one, on a retry or a second device)."
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "granted",
+                    "reportedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3107,7 +3982,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3126,7 +4005,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3145,7 +4028,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3467,7 +4354,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3486,7 +4377,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3505,7 +4400,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3819,7 +4718,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3838,7 +4741,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -3857,7 +4764,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4198,7 +5109,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4217,7 +5132,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4370,7 +5289,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4389,7 +5312,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4408,7 +5335,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4482,6 +5413,12 @@
                             "variantName": {
                               "type": "string",
                               "description": "The name of the selected variant"
+                            },
+                            "experimentId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "nullable": true,
+                              "description": "The SDUI experiment that assigned this variant. Echo it as experiment_id on offer events beside variant_id. Null or absent when no experiment decided the variant."
                             },
                             "minSdkVersion": {
                               "type": "string",
@@ -4712,7 +5649,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4731,7 +5672,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -4749,7 +5694,7 @@
           "publisher-sdk",
           "config"
         ],
-        "description": "Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.",
+        "description": "Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. `placementId` selects a variant an admin pinned to that placement, in `ui` only; any label without a pin resolves as before. `trigger` makes this a trigger component request (GiftsButton, ClaimReminder): `useCase` is then required and is the real use case it serves, `layout` pins a look and `autoOpen=off` opts the mount out of looks that open the sheet by itself (any other present value also reads as off); a missing useCase or a malformed trigger or layout is a 400. Without `trigger`, `layout` and `autoOpen` are ignored. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.",
         "parameters": [
           {
             "schema": {
@@ -4801,7 +5746,106 @@
             "in": "query",
             "name": "demoVariant",
             "required": false,
-            "description": "Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics."
+            "description": "Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. On a trigger request with autoOpen=off, an honoured look that opens the sheet by itself is served with behavior.autoOpen 'off'. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "trigger",
+            "required": false,
+            "description": "Present = a trigger component request (GiftsButton, ClaimReminder, customClaim): the camelCase trigger id, e.g. 'giftsButton'. Absent = a sheet request, unchanged. `useCase` is then REQUIRED and names the real use case the trigger serves (a missing useCase or a malformed trigger is a 400). The response's `ui.template` is that trigger's config (`ui.template.trigger` equals this id) or null, and `ui.useCase` echoes the requested use case. Its `root` is an SDUI element tree the SDK draws inline at `root`'s `style.frame.height` (the trigger's height), filling `${...}` from `ui.template.strings` and host values. customClaim (the custom-UI handle, which draws the app's own view) is answered with a rules-only look: layout 'behavior', no `root` or strings, minimal `ui.values`. `ui.template.behavior` names the look's step rules; `behavior.autoOpen` 'on' (an experiment arm only) opens the sheet once by itself, then draws the same look. A holdout carries `ui.experimentId` beside a null template, and `useCases` is always empty."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "layout",
+            "required": false,
+            "description": "Trigger requests only (ignored otherwise): pin the look, a camelCase layout name such as 'card' or 'pill' (malformed = 400). Serves the trigger's variant file marked pin for that layout, never enrolls in an experiment, and returns template null when there is none."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "description": "Trigger requests only (ignored otherwise): what happened on the device. 'claimOpen' = an eligible open claim; 'completed' = an offer finished on this local day, none claimed since, its thanks not tapped. The served look's behavior then picks the step's look: claimOpen on a gifts button whose behavior.afterClaim is showReminder is answered with the reminder look (ui.template.trigger claimReminder); completed applies behavior.afterComplete (gifts serves the look, hide serves template null, thanks serves the trigger's thanks look). Any other value is served as no state, and customClaim ignores every state (the device applies its rules)."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "autoOpen",
+            "required": false,
+            "description": "Trigger requests only (ignored otherwise): the mount's opt-out from looks that open the sheet by itself. Send 'off', and only when the mount forbids it; absent means allowed. Any other present value (another case, empty, repeated) is read as 'off', never as allowed, and is never a 400. With it, an experiment with any arm whose behavior.autoOpen is 'on', or whose file cannot be read, is skipped (the request gets the trigger's default look, never a lower experiment, and records no assignment), and any look served to the request carries behavior.autoOpen 'off'."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "seenDays",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): Distinct local days this placement's button counted an impression, before this request; 0 to 30. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "seenCount",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): Mounts at this placement whose impression fired, before this request; 0 to 5. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "taps",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): User taps on the button (auto pops do not count); 0 to 3. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "firstSeenDaysAgo",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): Local days since the first counted impression, 0 when never seen; 0 to 60. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "lastTapDaysAgo",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): Local days since the last user tap, absent when never tapped; 0 to 60. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "nudges",
+            "required": false,
+            "description": "GiftsButton requests without a layout pin only (ignored otherwise): ifIgnored answers this device already showed at this placement; 0 to 3, absent reads 0. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400."
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "placementId",
+            "required": false,
+            "description": "The publisher's placement label for the surface being configured, e.g. 'email_code'. Optional. When an admin has pinned an SDUI variant to this (app, placement), `ui` serves that variant instead of the experiment assignment, provided it is active or valid, matches the requested use case and passes its SDK version gate and app targeting. Otherwise, and for any label with no pin, resolution is unchanged. Never a 4xx on any input. Applies to `ui` only; the `useCases` prefetch block is never pinned."
           }
         ],
         "responses": {
@@ -4830,12 +5874,21 @@
                           "type": "string",
                           "format": "uuid",
                           "nullable": true,
-                          "description": "Selected variant ID"
+                          "description": "Selected variant ID. On a trigger step answer that draws nothing (template null with a step: a hide, or thanks with no thanks look), the look whose behavior decided it, so after_complete_hide can name it."
                         },
                         "variantName": {
                           "type": "string",
                           "nullable": true,
                           "description": "Selected variant name"
+                        },
+                        "step": {
+                          "type": "string",
+                          "description": "Trigger responses only: set when the look served (or template null) was chosen by a behavior for the request's `state`, or by the look's behavior.ifIgnored for a gifts button's exposure tally (a non-clicker). Values today: afterClaim, afterComplete, ifIgnored; more may be added, and an SDK treats a value it does not know as no step. With template null and an experimentId, it tells a behavior's hide apart from a holdout (an unknown step with template null is reported as reason unknown_step). Stamp it as step on the trigger events."
+                        },
+                        "stepExperimentId": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "Trigger responses with a `step` only: the experiment whose look's behavior chose the step (for a reminder in a gifts button spot, the gifts button's), beside experimentId (the drawn look's own; on an afterComplete step, the deciding look's, as a thanks look is in no arm). An opaque id (a UUID today). Stamp it as step_experiment_id on the trigger events."
                         },
                         "minSdkVersion": {
                           "type": "string",
@@ -4928,6 +5981,31 @@
                                   "type": "string",
                                   "nullable": true,
                                   "description": "Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default."
+                                },
+                                "rewardCta": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token."
+                                },
+                                "rewardDecline": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "Decline button label for the reward template. Same resolution and same null meaning as rewardCta."
+                                },
+                                "rewardBadge": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta."
+                                },
+                                "rewardMoreGifts": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta."
+                                },
+                                "rewardOtherGifts": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "description": "Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta."
                                 }
                               },
                               "description": "Text values for template substitution"
@@ -4971,6 +6049,44 @@
                                 "appstoreIcon"
                               ],
                               "description": "Media values (imagery URLs)"
+                            },
+                            "strings": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "description": "Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`."
+                            },
+                            "plurals": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "zero": {
+                                    "type": "string"
+                                  },
+                                  "one": {
+                                    "type": "string"
+                                  },
+                                  "two": {
+                                    "type": "string"
+                                  },
+                                  "few": {
+                                    "type": "string"
+                                  },
+                                  "many": {
+                                    "type": "string"
+                                  },
+                                  "other": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "other"
+                                ],
+                                "description": "CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder."
+                              },
+                              "description": "Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`."
                             }
                           },
                           "required": [
@@ -5090,6 +6206,31 @@
                                       "type": "string",
                                       "nullable": true,
                                       "description": "Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default."
+                                    },
+                                    "rewardCta": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token."
+                                    },
+                                    "rewardDecline": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Decline button label for the reward template. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardBadge": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardMoreGifts": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardOtherGifts": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta."
                                     }
                                   },
                                   "description": "Text values for template substitution"
@@ -5133,6 +6274,44 @@
                                     "appstoreIcon"
                                   ],
                                   "description": "Media values (imagery URLs)"
+                                },
+                                "strings": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "description": "Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`."
+                                },
+                                "plurals": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                      "zero": {
+                                        "type": "string"
+                                      },
+                                      "one": {
+                                        "type": "string"
+                                      },
+                                      "two": {
+                                        "type": "string"
+                                      },
+                                      "few": {
+                                        "type": "string"
+                                      },
+                                      "many": {
+                                        "type": "string"
+                                      },
+                                      "other": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "other"
+                                    ],
+                                    "description": "CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder."
+                                  },
+                                  "description": "Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`."
                                 }
                               },
                               "required": [
@@ -5250,6 +6429,31 @@
                                       "type": "string",
                                       "nullable": true,
                                       "description": "Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default."
+                                    },
+                                    "rewardCta": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token."
+                                    },
+                                    "rewardDecline": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Decline button label for the reward template. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardBadge": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardMoreGifts": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta."
+                                    },
+                                    "rewardOtherGifts": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta."
                                     }
                                   },
                                   "description": "Text values for template substitution"
@@ -5293,6 +6497,44 @@
                                     "appstoreIcon"
                                   ],
                                   "description": "Media values (imagery URLs)"
+                                },
+                                "strings": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "string"
+                                  },
+                                  "description": "Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`."
+                                },
+                                "plurals": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                      "zero": {
+                                        "type": "string"
+                                      },
+                                      "one": {
+                                        "type": "string"
+                                      },
+                                      "two": {
+                                        "type": "string"
+                                      },
+                                      "few": {
+                                        "type": "string"
+                                      },
+                                      "many": {
+                                        "type": "string"
+                                      },
+                                      "other": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "other"
+                                    ],
+                                    "description": "CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder."
+                                  },
+                                  "description": "Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`."
                                 }
                               },
                               "required": [
@@ -5414,6 +6656,13 @@
                     "locale": {
                       "type": "string",
                       "description": "Resolved locale served in this response (language-only, e.g. 'es'). Absent on pre-localization responses."
+                    },
+                    "ruledPlacements": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Placement labels for this app that carry a placement rule or pinned variant. Present whenever the app's placement rules can be read; empty when none. Clients scope their offers cache by placement only for labels in this list; when the field is absent (older server) clients keep their pre-2.4 behaviour."
                     }
                   },
                   "required": [
@@ -5422,6 +6671,29 @@
                     "useCases",
                     "entitlements",
                     "experiments"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
+                  },
+                  "required": [
+                    "error"
                   ]
                 }
               }
@@ -5437,7 +6709,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5456,7 +6732,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5548,7 +6828,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5567,7 +6851,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5585,7 +6873,7 @@
           "publisher-sdk",
           "users"
         ],
-        "description": "Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login.",
+        "description": "Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login. When newUserId already exists (the person signed in before, e.g. on another device), the anonymous user's completed and self-reported offers are copied onto that account, so they stay hidden and cannot be re-claimed. The copy is taken once, at this call: send any queued self-reports BEFORE it. A report for the anonymous user's claim that arrives afterwards is refused if it carries newUserId (404), and recorded on the anonymous user only, not this account, if it carries currentUserId.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5660,7 +6948,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5679,7 +6971,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5697,7 +6993,7 @@
           "publisher-sdk",
           "users"
         ],
-        "description": "Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.\n\nPrecedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.\n\nAGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — \"13-17\" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.\n\nGATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
+        "description": "Store targeting attributes against a user, ahead of opening the hosted offer page, so the page URL carries only apiKey and userId instead of the attributes themselves. A URL is written into webview history and into hosting access logs and cannot be unwritten. Idempotent on (app, userId): each call REPLACES the previously stored set rather than merging into it. No expiry — the last set stays authoritative until a newer one arrives, and is removed by a data-subject erasure request.\n\nPrecedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.\n\nLANGUAGE is accepted and ignored: it is never stored. The hosted page and the SDKs send it on each request, else Accept-Language decides.\n\nAGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — \"13-17\" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age` and `countryCode` are STORED — the attributes that decide where an offer may legally appear; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.\n\nGATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5720,7 +7016,8 @@
                         "description": "ISO 3166-1 alpha-2 country code (e.g., \"US\", \"GB\", \"CA\")."
                       },
                       "language": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Accepted for compatibility and ignored: the language is never stored. Send it on each request (attributes.language, or Accept-Language) instead."
                       },
                       "city": {
                         "type": "string"
@@ -5828,7 +7125,7 @@
                     },
                     "minor": {
                       "type": "boolean",
-                      "description": "True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full."
+                      "description": "True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age` and `countryCode` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full."
                     }
                   },
                   "required": [
@@ -5851,7 +7148,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5870,7 +7171,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5889,7 +7194,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5975,7 +7284,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -5994,7 +7307,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6079,7 +7396,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6098,7 +7419,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6117,7 +7442,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6136,7 +7465,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6217,7 +7550,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6236,7 +7573,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6255,7 +7596,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6291,6 +7636,10 @@
                   "email": {
                     "type": "string",
                     "format": "email"
+                  },
+                  "language": {
+                    "type": "string",
+                    "description": "Optional BCP 47 language tag (e.g. \"es\", \"pt-BR\"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE. The lead's emails go out in the language served."
                   },
                   "trialDurationDays": {
                     "type": "integer",
@@ -6359,7 +7708,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6378,7 +7731,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6397,7 +7754,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6482,7 +7843,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6501,7 +7866,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6520,7 +7889,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6610,7 +7983,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6629,7 +8006,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6648,7 +8029,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6667,7 +8052,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6686,7 +8075,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6773,7 +8166,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6792,7 +8189,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6811,7 +8212,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6830,7 +8235,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6849,7 +8258,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6868,7 +8281,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -6987,7 +8404,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7006,7 +8427,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7025,7 +8450,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7140,7 +8569,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7159,7 +8592,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7178,7 +8615,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7197,7 +8638,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7279,7 +8724,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7298,7 +8747,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7317,7 +8770,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7336,7 +8793,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7420,7 +8881,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7439,7 +8904,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7458,7 +8927,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7477,7 +8950,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7496,7 +8973,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7774,7 +9255,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7793,7 +9278,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7812,7 +9301,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -7986,7 +9479,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -8005,7 +9502,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -8024,7 +9525,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -8148,7 +9653,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -8167,7 +9676,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"
@@ -8186,7 +9699,11 @@
                     "error": {
                       "type": "string"
                     },
-                    "details": {}
+                    "details": {},
+                    "code": {
+                      "type": "string",
+                      "description": "Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent."
+                    }
                   },
                   "required": [
                     "error"

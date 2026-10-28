@@ -29,6 +29,11 @@ internal final class ErrorsClient {
     
     // MARK: - User Context
     
+    #if DEBUG
+    /// The user id error reports carry, read-only for tests.
+    var userIdForTesting: String? { userId.value }
+    #endif
+
     /// Set the current user ID. Called from Encore.identify() and Encore.reset().
     func setUserId(_ userId: String?) {
         self.userId.value = userId

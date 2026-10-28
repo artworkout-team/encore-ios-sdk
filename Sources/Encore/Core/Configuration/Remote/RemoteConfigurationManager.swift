@@ -41,6 +41,11 @@ class RemoteConfigurationManager {
     /// ceiling-expiry tests need not spend the real two seconds.
     internal static var fetchCeiling: TimeInterval = 2
 
+    #if DEBUG
+    /// Test seam: sees every `/config` fetch this SDK starts, with its user id.
+    nonisolated(unsafe) internal static var fetchObserverForTesting: ((String) -> Void)?
+    #endif
+
     /// Where the `[INTEGRATION]` hint goes. Injected only so tests can read the
     /// message the publisher would read — `Logger` writes to `print`, so a
     /// warning is otherwise unobservable and "we log it once" is untestable.
@@ -91,10 +96,18 @@ class RemoteConfigurationManager {
     /// window regardless of scheduling.
     private let currentIdentity = Atomic<ConfigIdentity?>(nil)
 
-    /// The inputs that determine which config the backend resolves.
+    /// The inputs that determine which config the backend resolves. Mirrors
+    /// Android: the host language AND the Accept-Language the request carried.
     internal struct ConfigIdentity: Equatable, Sendable {
         let userId: String
         let language: String?
+        let deviceLocale: String?
+
+        init(userId: String, language: String?, deviceLocale: String? = nil) {
+            self.userId = userId
+            self.language = language
+            self.deviceLocale = deviceLocale
+        }
     }
 
     /// A cached configuration together with the identity it was resolved for.
@@ -130,8 +143,40 @@ class RemoteConfigurationManager {
         return entry.configuration
     }
 
+    /// The latest /config answer's ruled placements. Not persisted: before the
+    /// first answer it is nil, which keys no placement, exactly as today.
+    ///
+    /// Deliberately NOT cleared by `clearCache()`. The server builds the list
+    /// per APP (`enabledRulesFor(appId)`), not per user, so it is just as true
+    /// after a reset; clearing it would send a pinned placement to the shared
+    /// set until the next /config answer.
+    private let _ruledPlacements = Atomic<RuledPlacements?>(nil)
+
+    /// The label a show under `label` keys the offers cache on, or nil.
+    func cachePlacement(for label: String?) -> String? {
+        RuledPlacements.cacheLabel(for: label, in: _ruledPlacements.value)
+    }
+
     /// Current churn-intervention configuration snapshot (thread-safe read)
     var config: RemoteConfiguration? { currentEntry(for: .reduceChurn) }
+
+    /// The entry whose `ui.values` carries served SDK strings, churn first. One
+    /// response's entries share them, so any carrier will do; else `config`.
+    var servedCopyConfig: RemoteConfiguration? {
+        let carrier = ([UseCase.reduceChurn] + UseCase.allCases).lazy
+            .compactMap(currentEntry(for:))
+            .first { $0.ui.values.strings != nil || $0.ui.values.plurals != nil }
+        return carrier ?? config
+    }
+
+    /// The locale `useCase` renders in: its own entry's, else the strings
+    /// carrier's, since a use case on its floor shows the carrier's strings.
+    func servedLocale(for useCase: UseCase) -> String? {
+        config(for: useCase)?.locale ?? servedCopyConfig?.locale
+    }
+
+    /// The `language` attribute the latest fetch was issued with.
+    var requestedLanguage: String? { currentIdentity.value?.language }
 
     /// Configuration for `useCase`, or nil when it hasn't been fetched yet
     /// (or the fetch failed).
@@ -151,16 +196,19 @@ class RemoteConfigurationManager {
 
     // MARK: - Initialization
 
+    /// `language` is the host override at launch: a blob resolved for another
+    /// locale keeps only its app facts. Required, so a call site cannot drop it.
     init(
         repository: RemoteConfigurationRepository,
+        language: String?,
         integrationWarning: @escaping (String) -> Void = { Logger.warn($0) }
     ) {
         self.repository = repository
         self.integrationWarning = integrationWarning
 
         // Load last-known-good config from disk (instant availability).
-        // Identity-less: the blob is not stamped, and pre-dates the session.
-        if let cached = repository.getLocal() {
+        // Identity-less: it pre-dates the session. Locale-checked on read.
+        if let cached = repository.getLocal(forLanguage: language) {
             _configs.value = [.reduceChurn: StampedConfiguration(configuration: cached, identity: nil)]
             Logger.info("📦 [RemoteConfig] Loaded cached config from disk: variantId=\(cached.ui.variantId ?? "nil")")
         } else {
@@ -193,16 +241,19 @@ class RemoteConfigurationManager {
 
     /// Fetches remote configuration. Fire-and-forget — cancels any in-flight request (latest identity wins).
     /// `language` overrides device locale on the backend when non-nil; pass
-    /// `userManager.userAttributes?.language` from callers so an in-app picker
-    /// is the single source of truth.
+    /// `userManager.language`, the host's `setLanguage` override. Required, so
+    /// a call site cannot drop it.
     ///
     /// Resolves **churn intervention** and caches every use case the app is
     /// enabled for from the same response's prefetch block.
-    func fetch(userId: String, sdkVersion: String, language: String? = nil) {
+    func fetch(userId: String, sdkVersion: String, language: String?) {
+        #if DEBUG
+        Self.fetchObserverForTesting?(userId)
+        #endif
         Logger.debug("🔄 [RemoteConfig] Starting fetch for userId=\(userId), language=\(language ?? "device"), hasExistingConfig=\(config != nil)")
         inFlightTask.value?.cancel()
 
-        let identity = ConfigIdentity(userId: userId, language: language)
+        let identity = ConfigIdentity(userId: userId, language: language, deviceLocale: repository.deviceLocale)
         let previousIdentity = currentIdentity.value
 
         // Publish the new identity BEFORE dispatching anything, so a lazy fetch
@@ -219,18 +270,21 @@ class RemoteConfigurationManager {
         // arm off the disk), and the served churn entry is demoted to its
         // app-level facts, so sync reads fall to the new identity's stored
         // template or the floor rather than rendering the old assignment.
+        // A language switch drops the copy too: it is the old language's.
         if let previousIdentity, previousIdentity != identity {
             repository.clearStoredTemplates()
+            let languageChanged = previousIdentity.language != identity.language
             _configs.mutate { configs in
                 guard let churn = configs[.reduceChurn]?.configuration else { return }
-                configs[.reduceChurn] = StampedConfiguration(
-                    configuration: RemoteConfiguration(
-                        ui: UIConfiguration(variantId: nil, values: churn.ui.values, template: nil),
-                        entitlements: churn.entitlements,
-                        experiments: churn.experiments
-                    ),
-                    identity: nil
+                let demoted = languageChanged ? churn.withoutCopy() : RemoteConfiguration(
+                    ui: UIConfiguration(variantId: nil, values: churn.ui.values, template: nil),
+                    entitlements: churn.entitlements,
+                    experiments: churn.experiments,
+                    locale: churn.locale,
+                    language: churn.language,
+                    deviceLocale: churn.deviceLocale
                 )
+                configs[.reduceChurn] = StampedConfiguration(configuration: demoted, identity: nil)
             }
         }
 
@@ -285,7 +339,7 @@ class RemoteConfigurationManager {
         // nil (post-reset, pre-fetch) serves nothing, and a superseded caller
         // cannot install what it just stored. Every production launch passes
         // through `fetch` before any presentation, so this costs nothing.
-        let requestedFor = ConfigIdentity(userId: userId, language: language)
+        let requestedFor = ConfigIdentity(userId: userId, language: language, deviceLocale: repository.deviceLocale)
         let callerIsCurrent = currentIdentity.value == requestedFor
         if callerIsCurrent, let stored = storedConfiguration(for: useCase, userId: userId, language: language) {
             // Demo fetches never persist, so under a demo-variant request this
@@ -318,7 +372,7 @@ class RemoteConfigurationManager {
             warnPrefetchWasMissed(useCase)
         }
 
-        let requestedFor = ConfigIdentity(userId: userId, language: language)
+        let requestedFor = ConfigIdentity(userId: userId, language: language, deviceLocale: repository.deviceLocale)
         let key = LazyFetchKey(useCase: useCase, demoVariant: demoVariant)
         let repository = self.repository
         let task: Task<RemoteConfiguration?, Never> = lazyTasks.mutate { tasks in
@@ -367,6 +421,7 @@ class RemoteConfigurationManager {
                             demoVariant: demoVariant
                         )
                     }
+                    self?._ruledPlacements.value = result.ruledPlacements
                     Logger.info("✅ [RemoteConfig] Fetched \(useCase.rawValue): variantId=\(result.configuration.ui.variantId ?? "none"), variantName=\(result.configuration.ui.variantName ?? "none"), demoVariant=\(demoVariant ?? "none")")
                     return result.configuration
                 } catch {
@@ -404,11 +459,19 @@ class RemoteConfigurationManager {
 
         let ui = UIConfiguration(
             variantId: stored.variantId,
+            experimentId: stored.experimentId,
             variantName: stored.variantName,
             values: stored.uiValues,
             template: template
         )
-        return RemoteConfiguration(ui: ui, entitlements: blob.entitlements, experiments: blob.experiments)
+        return RemoteConfiguration(
+            ui: ui,
+            entitlements: blob.entitlements,
+            experiments: blob.experiments,
+            locale: stored.locale,
+            language: stored.language,
+            deviceLocale: stored.deviceLocale
+        )
     }
 
     /// Performs one `/config` round trip for `identity` and caches what it
@@ -450,6 +513,7 @@ class RemoteConfigurationManager {
             // fetch itself, so they land before this blob save: a torn write
             // leaves a template without a blob, which rung 2 reads as absent.
             // The blob holds churn intervention only (see `_configs`).
+            _ruledPlacements.value = bundle.ruledPlacements
             repository.saveLocal(bundle.configuration)
             resolved = bundle.configuration
             Logger.info("✅ [RemoteConfig] Fetched: variantId=\(bundle.configuration.ui.variantId ?? "none"), prefetched=\(bundle.prefetched.keys.map(\.rawValue).sorted())")

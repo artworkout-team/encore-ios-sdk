@@ -44,24 +44,28 @@ extension View {
 private struct VisibilityProbe: ViewModifier {
     let threshold: Double
     let action: () -> Void
+    @Environment(\.visibilityProbesPaused) private var paused
 
     func body(content: Content) -> some View {
         content.background(
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { evaluate(frame: proxy.frame(in: .global)) }
+                    .onAppear { evaluate(frame: proxy.frame(in: .global), paused: paused) }
                     .onChange(of: proxy.frame(in: .global)) { frame in
                         // Single-argument `onChange` (iOS 14+) — keeps the
                         // primitive available below iOS 17. The two-argument
                         // (`old, new`) form would gate the whole API.
-                        evaluate(frame: frame)
+                        evaluate(frame: frame, paused: paused)
                     }
+                    // The frame does not move when a cover lifts, so check again then.
+                    // Use the new value: the closure can still see the old one.
+                    .onChange(of: paused) { isPaused in evaluate(frame: proxy.frame(in: .global), paused: isPaused) }
             }
         )
     }
 
-    private func evaluate(frame: CGRect) {
-        guard frame.width > 0, frame.height > 0 else { return }
+    private func evaluate(frame: CGRect, paused: Bool) {
+        guard !paused, frame.width > 0, frame.height > 0 else { return }
         let bounds = Self.activeWindowBounds
         let intersection = frame.intersection(bounds)
         let visibleArea = intersection.width * intersection.height
@@ -78,6 +82,21 @@ private struct VisibilityProbe: ViewModifier {
             .compactMap { $0 as? UIWindowScene }
             .first(where: { $0.activationState == .foregroundActive })?
             .keyWindow?.bounds ?? UIScreen.main.bounds
+    }
+}
+
+// MARK: - Paused probes
+
+private struct VisibilityProbesPausedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while something opaque covers these views (a full-screen cover).
+    /// Probes stay quiet, then check again once it clears.
+    var visibilityProbesPaused: Bool {
+        get { self[VisibilityProbesPausedKey.self] }
+        set { self[VisibilityProbesPausedKey.self] = newValue }
     }
 }
 

@@ -22,6 +22,8 @@ struct OfferAnalyticsContext {
     
     // SDUI Variant tracking
     let variantId: String?
+    /// Experiment that decided `variantId`; omitted from events when nil.
+    let experimentId: String?
 
     /// Publisher placement that triggered this presentation. Multi-placement
     /// integrations are unauditable without it on every offer event.
@@ -33,7 +35,7 @@ struct OfferAnalyticsContext {
     let useCase: UseCase
 
     /// Create context from an Offer and current view state
-    init(offer: Offer, impressionId: String, offerIndex: Int, totalOffers: Int, presentationId: String, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(offer: Offer, impressionId: String, offerIndex: Int, totalOffers: Int, presentationId: String, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.campaignId = offer.id
         self.creativeId = offer.primaryCreative?.id
         self.advertiserName = offer.advertiserName
@@ -42,12 +44,13 @@ struct OfferAnalyticsContext {
         self.totalOffers = totalOffers
         self.presentationId = presentationId
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase
         self.placementId = placementId
     }
 
     /// Direct initialization for legacy/custom use
-    init(campaignId: String, creativeId: String?, advertiserName: String, impressionId: String, offerIndex: Int, totalOffers: Int, presentationId: String, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(campaignId: String, creativeId: String?, advertiserName: String, impressionId: String, offerIndex: Int, totalOffers: Int, presentationId: String, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.campaignId = campaignId
         self.creativeId = creativeId
         self.advertiserName = advertiserName
@@ -56,6 +59,7 @@ struct OfferAnalyticsContext {
         self.totalOffers = totalOffers
         self.presentationId = presentationId
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase
         self.placementId = placementId
     }
@@ -69,12 +73,14 @@ struct OfferPresentationTriggeredEvent: AnalyticsEvent {
     
     let presentationId: String
     let variantId: String?
+    let experimentId: String?
     let useCase: String
     let placementId: String?
 
-    init(presentationId: String, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(presentationId: String, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.presentationId = presentationId
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase.rawValue
         self.placementId = placementId
     }
@@ -154,16 +160,18 @@ struct OfferPresentationFailedEvent: AnalyticsEvent {
     let iosVersion: String?
     let presentationId: String
     let variantId: String?
+    let experimentId: String?
     let useCase: String
     let placementId: String?
 
     /// `.notPresented` reasons emit the same wire values the equivalent 1.x
     /// `DismissReason`s did (see `NotPresentedReason.wireValue`).
-    init(reason: NotPresentedReason, iosVersion: String? = nil, presentationId: String, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(reason: NotPresentedReason, iosVersion: String? = nil, presentationId: String, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.reason = reason.wireValue
         self.iosVersion = iosVersion
         self.presentationId = presentationId
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase.rawValue
         self.placementId = placementId
     }
@@ -176,13 +184,15 @@ struct OfferPresentationSuccessEvent: AnalyticsEvent {
     let presentationId: String
     let offerCount: String
     let variantId: String?
+    let experimentId: String?
     let useCase: String
     let placementId: String?
 
-    init(presentationId: String, offerCount: String, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(presentationId: String, offerCount: String, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.presentationId = presentationId
         self.offerCount = offerCount
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase.rawValue
         self.placementId = placementId
     }
@@ -201,10 +211,15 @@ struct OfferPresentedEvent: OfferContextEvent {
     let presentationTrigger: String
     let presentationId: String
     let variantId: String?
+    let experimentId: String?
     let useCase: String
     let placementId: String?
+    /// True when the offer's picture was in the image cache as the impression fired.
+    /// Omitted when the offer has no picture.
+    let imageCacheHit: Bool?
 
-    init(_ ctx: OfferAnalyticsContext, trigger: String) {
+    init(_ ctx: OfferAnalyticsContext, trigger: String, imageCacheHit: Bool?) {
+        self.imageCacheHit = imageCacheHit
         self.campaignId = ctx.campaignId
         self.creativeId = ctx.creativeId
         self.advertiserName = ctx.advertiserName
@@ -214,6 +229,7 @@ struct OfferPresentedEvent: OfferContextEvent {
         self.presentationId = ctx.presentationId
         self.presentationTrigger = trigger
         self.variantId = ctx.variantId
+        self.experimentId = ctx.experimentId
         self.useCase = ctx.useCase.rawValue
         self.placementId = ctx.placementId
     }
@@ -232,6 +248,7 @@ struct OfferClaimedEvent: OfferContextEvent {
     let totalOffers: Int
     let presentationId: String
     let variantId: String?
+    let experimentId: String?
     let useCase: String
     let placementId: String?
 
@@ -245,6 +262,67 @@ struct OfferClaimedEvent: OfferContextEvent {
         self.presentationId = ctx.presentationId
         self.transactionId = transactionId
         self.variantId = ctx.variantId
+        self.experimentId = ctx.experimentId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+    }
+}
+
+/// The steps-screen preload's lifecycle (CONTRACT rule 18): every booked click joins a transaction id.
+struct OfferPreloadEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_preload"
+
+    enum Phase: String, Encodable {
+        case started, refreshed, adopted, discarded
+    }
+
+    /// Why a started page was dropped. Wire values are the backend registry's.
+    enum Reason: String, Encodable, CaseIterable {
+        case stateLeft = "state_left"
+        case selectionChanged = "selection_changed"
+        case sheetClosed = "sheet_closed"
+        /// The Continue tap's claim answered a different id.
+        case claimMismatch = "claim_mismatch"
+        /// The claim failed or was abandoned after the held page went to the claim screen.
+        case claimFailed = "claim_failed"
+        case notClaimable = "not_claimable"
+        case appHandoffBlocked = "app_handoff_blocked"
+        case webContentCrashed = "web_content_crashed"
+        case refreshRefused = "refresh_refused"
+        case reservationExpired = "reservation_expired"
+
+        static var allWire: [String] { allCases.map(\.rawValue) }
+    }
+
+    let phase: Phase
+    /// Only on `discarded`.
+    let reason: Reason?
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let transactionId: String
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let experimentId: String?
+    let useCase: String
+    let placementId: String?
+
+    init(_ ctx: OfferAnalyticsContext, transactionId: String, phase: Phase, reason: Reason? = nil) {
+        self.phase = phase
+        self.reason = phase == .discarded ? reason : nil
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.transactionId = transactionId
+        self.variantId = ctx.variantId
+        self.experimentId = ctx.experimentId
         self.useCase = ctx.useCase.rawValue
         self.placementId = ctx.placementId
     }
@@ -316,6 +394,103 @@ struct OfferClaimReturnedEvent: OfferContextEvent {
     }
 }
 
+/// Tracked when the "Did you finish?" question opens after a claim returns, on
+/// a variant that can record the answer. `publisher_reward_id` is present only
+/// when this question could earn the prize (the promise was shown and, in on_verified,
+/// the offer carries a value); the prize's title and detail never leave the device.
+struct OfferCompletionPromptedEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_completion_prompted"
+
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let transactionId: String?
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let useCase: String
+    let placementId: String?
+    let publisherRewardId: String?
+    /// Whether this question could earn the prize: a usable prize, an identified
+    /// user, and the server's promise.
+    let rewardEligible: Bool
+    /// `no_prize`, `anonymous`, `daily_cap` or `unverified`; present exactly when
+    /// `rewardEligible` is false.
+    let ineligibleReason: String?
+
+    init(_ ctx: OfferAnalyticsContext, transactionId: String?, publisherRewardId: String?, ineligibility: PublisherRewardIneligibility?) {
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.transactionId = transactionId
+        self.variantId = ctx.variantId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+        self.publisherRewardId = publisherRewardId
+        self.rewardEligible = ineligibility == nil
+        self.ineligibleReason = ineligibility?.rawValue
+    }
+}
+
+/// Tracked when the user answers the "Did you finish?" question: `yes` from a
+/// `reportCompletion` tap, `no` when they leave the question for another state.
+/// `seconds_away` is the time between opening the offer and coming back.
+struct OfferCompletionAnsweredEvent: OfferContextEvent {
+    static let eventName = "sdk_offer_completion_answered"
+
+    enum Answer: String { case yes, no }
+
+    let campaignId: String
+    let creativeId: String?
+    let advertiserName: String
+    let impressionId: String
+    let transactionId: String?
+    let offerIndex: Int
+    let totalOffers: Int
+    let presentationId: String
+    let variantId: String?
+    let useCase: String
+    let placementId: String?
+    let answer: String
+    let publisherRewardId: String?
+    /// Whether this question could earn the prize, as on the prompted event.
+    let rewardEligible: Bool
+    /// Why nothing was earned: the prompted event's reason when `rewardEligible` is
+    /// false; on an eligible Yes the server didn't grant, its reason (`per_offer`,
+    /// `daily_cap`) or `unverified` when it gave none.
+    let ineligibleReason: String?
+    /// True only when the server granted a Yes and the flag landed on the claim; false on every No.
+    let userConfirmedCompletion: Bool
+    let secondsAway: Int?
+
+    init(_ ctx: OfferAnalyticsContext, answer: Answer, transactionId: String?, publisherRewardId: String?,
+         rewardEligible: Bool, ineligibility: PublisherRewardIneligibility?, userConfirmedCompletion: Bool, secondsAway: Int?) {
+        self.campaignId = ctx.campaignId
+        self.creativeId = ctx.creativeId
+        self.advertiserName = ctx.advertiserName
+        self.impressionId = ctx.impressionId
+        self.offerIndex = ctx.offerIndex
+        self.totalOffers = ctx.totalOffers
+        self.presentationId = ctx.presentationId
+        self.transactionId = transactionId
+        self.variantId = ctx.variantId
+        self.useCase = ctx.useCase.rawValue
+        self.placementId = ctx.placementId
+        self.answer = answer.rawValue
+        self.publisherRewardId = publisherRewardId
+        self.rewardEligible = rewardEligible
+        self.ineligibleReason = ineligibility?.rawValue
+        self.userConfirmedCompletion = userConfirmedCompletion
+        self.secondsAway = secondsAway
+    }
+}
+
 /// Tracked when the server confirms the conversion: the in-sheet strict poll
 /// success (full context) or the cross-launch reconciler (no sheet, so only
 /// `transaction_id`; absent context fields stay absent, never fabricated).
@@ -384,6 +559,12 @@ enum ClaimFailureReason: String {
     case missingDestinationUrl = "missing_destination_url"
     /// The transaction started but the resolved destination URL didn't parse.
     case invalidDestinationUrl = "invalid_destination_url"
+    /// An `.external` claim's http(s) URL could not open in the system browser, so the
+    /// in-app browser opened it instead. Not terminal: webview events follow.
+    case externalBrowserUnavailable = "external_browser_unavailable"
+    /// The server refused the claim (409 `offerAlreadyCompleted`): this user already
+    /// completed or said they finished it. The offer is dropped, not retried.
+    case alreadyCompleted = "already_completed"
 }
 
 /// Tracked whenever a Claim tap fails to reach the webview. This is the
@@ -446,11 +627,12 @@ struct OfferSheetDismissedEvent: AnalyticsEvent {
     let finalOfferCreativeId: String?
     let finalOfferAdvertiserName: String?
     let variantId: String?
+    let experimentId: String?
 
     let useCase: String
     let placementId: String?
 
-    init(presentationId: String, totalTime: Double, reason: DismissReason, totalOffers: Int, offersViewed: Int, finalIndex: Int, finalCampaignId: String?, finalCreativeId: String?, finalAdvertiserName: String?, variantId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
+    init(presentationId: String, totalTime: Double, reason: DismissReason, totalOffers: Int, offersViewed: Int, finalIndex: Int, finalCampaignId: String?, finalCreativeId: String?, finalAdvertiserName: String?, variantId: String? = nil, experimentId: String? = nil, useCase: UseCase = .reduceChurn, placementId: String? = nil) {
         self.presentationId = presentationId
         self.totalTimeSpentSeconds = totalTime
         self.totalTimeSpentFormatted = String(format: "%.1fs", totalTime)
@@ -462,6 +644,7 @@ struct OfferSheetDismissedEvent: AnalyticsEvent {
         self.finalOfferCreativeId = finalCreativeId
         self.finalOfferAdvertiserName = finalAdvertiserName
         self.variantId = variantId
+        self.experimentId = experimentId
         self.useCase = useCase.rawValue
         self.placementId = placementId
     }

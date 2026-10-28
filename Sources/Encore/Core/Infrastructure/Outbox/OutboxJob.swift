@@ -39,9 +39,9 @@ internal struct OutboxJob: Sendable {
     /// Which backend this job targets (defaults to `.oltp` for backwards compatibility)
     let clientTarget: ClientTarget
     
-    init(request: OutboxRequest, clientTarget: ClientTarget = .oltp) {
+    init(request: OutboxRequest, clientTarget: ClientTarget = .oltp, createdAt: Date = Date()) {
         self.id = UUID().uuidString
-        self.createdAt = Date()
+        self.createdAt = createdAt
         self.attemptCount = 0
         self.lastError = nil
         self.request = request

@@ -21,7 +21,7 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/search`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/search/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. On the serve path, offers this end user already completed (a confirmed conversion, or a Yes they reported through an Encore SDK) are left out. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
@@ -41,16 +41,26 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/impressions/{impression_uid}/delivered`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_impressions_sol__lcub_impression_uid_rcub__sol_delivered(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_impressions_sol__lcub_impression_uid_rcub__sol_delivered.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_impressions_sol__lcub_impression_uid_rcub__sol_delivered.Output
-    /// Create a new transaction for a specific campaign
+    /// Create a new transaction for a specific campaign. 409 with code 'offerAlreadyCompleted' when this user already completed the offer, or said Yes to it through a self-report: drop the offer from the list rather than retrying. The app-wide trial-limit 409 carries no code.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/transactions`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_transactions(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Output
+    /// Reserve the transaction id to substitute for TRANSACTION_ID when preloading an offer link before the claim tap. Not a claim: nothing is counted, stamped or frozen until POST /transactions, which returns this same id when it comes within 30 minutes of the last preload. Send the claim's body. 409 with code 'preloadUnsupported' when this offer's link must not be loaded before a tap; 409 'offerAlreadyCompleted' and the trial-limit 409 as on the claim. Treat any non-200 as no preload.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/preload`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post`.
+    func post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output
     /// Send a grant signal (provisional or final). Must be idempotent.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/{transactionId}/signals`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/signals/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Output
+    /// Record that the user answered "Yes, I completed it" to a reward-for-trying offer, and decide whether the app may grant its own prize. Send it on EVERY tapped Yes, prize or not: the Yes is stored per person (the app's user id), so the offer is hidden from that person on every surface and a re-claim is refused (409 offerAlreadyCompleted), including after a reinstall or on a second device. granted is true only for the first Yes per person per offer, while the person is under the app's daily limit (a rolling 24 hours). Treat no answer as no prize. Idempotent on reportId. Never changes the transaction: no status, payout, entitlement or webhook. 404 when the transaction does not belong to this app, or userId is not the current user id of the person who claimed it. The server cannot tell an identified user from an SDK-generated anonymous id: an app that wants prizes kept to signed-in users must gate the promise client-side.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/{transactionId}/self-report`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post`.
+    func post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output
     /// Get verification status for a transaction. Pass verify=true to actively fetch from the advertiser before returning.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/transactions/{transactionId}/status`.
@@ -81,7 +91,7 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /publisher/sdk/v1/ui-config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/ui-config/get`.
     func get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config(_ input: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config.Input) async throws -> Operations.get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config.Output
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. `placementId` selects a variant an admin pinned to that placement, in `ui` only; any label without a pin resolves as before. `trigger` makes this a trigger component request (GiftsButton, ClaimReminder): `useCase` is then required and is the real use case it serves, `layout` pins a look and `autoOpen=off` opts the mount out of looks that open the sheet by itself (any other present value also reads as off); a missing useCase or a malformed trigger or layout is a 400. Without `trigger`, `layout` and `autoOpen` are ignored. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -91,7 +101,7 @@ internal protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /publisher/sdk/v1/users`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/post`.
     func post_sol_publisher_sol_sdk_sol_v1_sol_users(_ input: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users.Input) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_users.Output
-    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login.
+    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login. When newUserId already exists (the person signed in before, e.g. on another device), the anonymous user's completed and self-reported offers are copied onto that account, so they stay hidden and cannot be re-claimed. The copy is taken once, at this call: send any queued self-reports BEFORE it. A report for the anonymous user's claim that arrives afterwards is refused if it carries newUserId (404), and recorded on the anonymous user only, not this account, if it carries currentUserId.
     ///
     /// - Remark: HTTP `PATCH /publisher/sdk/v1/users/identify`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/identify/patch`.
@@ -100,7 +110,9 @@ internal protocol APIProtocol: Sendable {
     ///
     /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
     ///
-    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    /// LANGUAGE is accepted and ignored: it is never stored. The hosted page and the SDKs send it on each request, else Accept-Language decides.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age` and `countryCode` are STORED — the attributes that decide where an offer may legally appear; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
     ///
     /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
@@ -207,7 +219,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. On the serve path, offers this end user already completed (a confirmed conversion, or a Yes they reported through an Encore SDK) are left out. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
@@ -261,7 +273,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Create a new transaction for a specific campaign
+    /// Create a new transaction for a specific campaign. 409 with code 'offerAlreadyCompleted' when this user already completed the offer, or said Yes to it through a self-report: drop the offer from the list rather than retrying. The app-wide trial-limit 409 carries no code.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/transactions`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/post`.
@@ -270,6 +282,19 @@ extension APIProtocol {
         body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input.Body
     ) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Output {
         try await post_sol_publisher_sol_sdk_sol_v1_sol_transactions(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Reserve the transaction id to substitute for TRANSACTION_ID when preloading an offer link before the claim tap. Not a claim: nothing is counted, stamped or frozen until POST /transactions, which returns this same id when it comes within 30 minutes of the last preload. Send the claim's body. 409 with code 'preloadUnsupported' when this offer's link must not be loaded before a tap; 409 'offerAlreadyCompleted' and the trial-limit 409 as on the claim. Treat any non-200 as no preload.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/preload`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post`.
+    internal func post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload(
+        headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Headers = .init(),
+        body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body
+    ) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output {
+        try await post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input(
             headers: headers,
             body: body
         ))
@@ -284,6 +309,21 @@ extension APIProtocol {
         body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Input.Body
     ) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Output {
         try await post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Input(
+            path: path,
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Record that the user answered "Yes, I completed it" to a reward-for-trying offer, and decide whether the app may grant its own prize. Send it on EVERY tapped Yes, prize or not: the Yes is stored per person (the app's user id), so the offer is hidden from that person on every surface and a re-claim is refused (409 offerAlreadyCompleted), including after a reinstall or on a second device. granted is true only for the first Yes per person per offer, while the person is under the app's daily limit (a rolling 24 hours). Treat no answer as no prize. Idempotent on reportId. Never changes the transaction: no status, payout, entitlement or webhook. 404 when the transaction does not belong to this app, or userId is not the current user id of the person who claimed it. The server cannot tell an identified user from an SDK-generated anonymous id: an app that wants prizes kept to signed-in users must gate the promise client-side.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/{transactionId}/self-report`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post`.
+    internal func post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report(
+        path: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Path,
+        headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Headers = .init(),
+        body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Body
+    ) async throws -> Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output {
+        try await post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input(
             path: path,
             headers: headers,
             body: body
@@ -369,7 +409,7 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. `placementId` selects a variant an admin pinned to that placement, in `ui` only; any label without a pin resolves as before. `trigger` makes this a trigger component request (GiftsButton, ClaimReminder): `useCase` is then required and is the real use case it serves, `layout` pins a look and `autoOpen=off` opts the mount out of looks that open the sheet by itself (any other present value also reads as off); a missing useCase or a malformed trigger or layout is a 400. Without `trigger`, `layout` and `autoOpen` are ignored. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -395,7 +435,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login.
+    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login. When newUserId already exists (the person signed in before, e.g. on another device), the anonymous user's completed and self-reported offers are copied onto that account, so they stay hidden and cannot be re-claimed. The copy is taken once, at this call: send any queued self-reports BEFORE it. A report for the anonymous user's claim that arrives afterwards is refused if it carries newUserId (404), and recorded on the anonymous user only, not this account, if it carries currentUserId.
     ///
     /// - Remark: HTTP `PATCH /publisher/sdk/v1/users/identify`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/identify/patch`.
@@ -412,7 +452,9 @@ extension APIProtocol {
     ///
     /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
     ///
-    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    /// LANGUAGE is accepted and ignored: it is never stored. The hosted page and the SDKs send it on each request, else Accept-Language decides.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age` and `countryCode` are STORED — the attributes that decide where an offer may legally appear; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
     ///
     /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
@@ -1003,6 +1045,30 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/termsUrl`.
                             internal var termsUrl: Swift.String?
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/displayProperties`.
+                            internal struct displayPropertiesPayload: Codable, Hashable, Sendable {
+                                /// A container of undocumented properties.
+                                internal var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                                /// Creates a new `displayPropertiesPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - additionalProperties: A container of undocumented properties.
+                                internal init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                                    self.additionalProperties = additionalProperties
+                                }
+                                internal init(from decoder: any Decoder) throws {
+                                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                }
+                                internal func encode(to encoder: any Encoder) throws {
+                                    try encoder.encodeAdditionalProperties(additionalProperties)
+                                }
+                            }
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/displayProperties`.
+                            internal var displayProperties: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/createdAt`.
                             internal var createdAt: Foundation.Date
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/updatedAt`.
@@ -1088,10 +1154,12 @@ internal enum Operations {
                                 internal var additionalImages: [Swift.String]?
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/ctaText`.
                                 internal var ctaText: Swift.String
-                                /// Optional override for campaign destinationUrl
+                                /// The campaign's destination, on a served creative; null where not served
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/destinationUrl`.
                                 internal var destinationUrl: Swift.String?
+                                /// The campaign's claim tracking, on a served creative; null where not served
+                                ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/trackingParameters`.
                                 internal struct trackingParametersPayload: Codable, Hashable, Sendable {
                                     /// A container of undocumented properties.
@@ -1110,6 +1178,8 @@ internal enum Operations {
                                         try encoder.encodeAdditionalProperties(additionalProperties)
                                     }
                                 }
+                                /// The campaign's claim tracking, on a served creative; null where not served
+                                ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/trackingParameters`.
                                 internal var trackingParameters: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.trackingParametersPayload?
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/weight`.
@@ -1133,25 +1203,33 @@ internal enum Operations {
                                     internal var subtitle: Swift.String
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/ctaButtonText`.
                                     internal var ctaButtonText: Swift.String?
+                                    /// Optional https image for this step. Absent: the step has none.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/imageUrl`.
+                                    internal var imageUrl: Swift.String?
                                     /// Creates a new `instructionsPayloadPayload`.
                                     ///
                                     /// - Parameters:
                                     ///   - title:
                                     ///   - subtitle:
                                     ///   - ctaButtonText:
+                                    ///   - imageUrl: Optional https image for this step. Absent: the step has none.
                                     internal init(
                                         title: Swift.String,
                                         subtitle: Swift.String,
-                                        ctaButtonText: Swift.String? = nil
+                                        ctaButtonText: Swift.String? = nil,
+                                        imageUrl: Swift.String? = nil
                                     ) {
                                         self.title = title
                                         self.subtitle = subtitle
                                         self.ctaButtonText = ctaButtonText
+                                        self.imageUrl = imageUrl
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case title
                                         case subtitle
                                         case ctaButtonText
+                                        case imageUrl
                                     }
                                 }
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/200/content/json/offersPayload/creativesPayload/instructions`.
@@ -1536,8 +1614,8 @@ internal enum Operations {
                                 ///   - logoUrl:
                                 ///   - additionalImages:
                                 ///   - ctaText:
-                                ///   - destinationUrl: Optional override for campaign destinationUrl
-                                ///   - trackingParameters:
+                                ///   - destinationUrl: The campaign's destination, on a served creative; null where not served
+                                ///   - trackingParameters: The campaign's claim tracking, on a served creative; null where not served
                                 ///   - weight:
                                 ///   - status:
                                 ///   - instructions:
@@ -1660,6 +1738,7 @@ internal enum Operations {
                             ///   - badgeLabel: Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge.
                             ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
                             ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - displayProperties: Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
                             ///   - createdAt:
                             ///   - updatedAt:
                             ///   - organization: Included when fetching with relations
@@ -1690,6 +1769,7 @@ internal enum Operations {
                                 badgeLabel: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
                                 heroImageUrl: Swift.String? = nil,
                                 termsUrl: Swift.String? = nil,
+                                displayProperties: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload? = nil,
                                 createdAt: Foundation.Date,
                                 updatedAt: Foundation.Date,
                                 organization: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_offers.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
@@ -1720,6 +1800,7 @@ internal enum Operations {
                                 self.badgeLabel = badgeLabel
                                 self.heroImageUrl = heroImageUrl
                                 self.termsUrl = termsUrl
+                                self.displayProperties = displayProperties
                                 self.createdAt = createdAt
                                 self.updatedAt = updatedAt
                                 self.organization = organization
@@ -1751,6 +1832,7 @@ internal enum Operations {
                                 case badgeLabel
                                 case heroImageUrl
                                 case termsUrl
+                                case displayProperties
                                 case createdAt
                                 case updatedAt
                                 case organization
@@ -1876,21 +1958,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/GET/responses/500/content/application\/json`.
@@ -2033,10 +2123,18 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/longitude`.
                         internal var longitude: Swift.String?
+                        /// Whole years, as an integer. If you hold only a RANGE, send its LOWEST end: "13-17" is sent as 13. Under 18 restricts this request to offers rated for that age, with no per-user personalisation. Used for this request only and never stored. Lower than an age stored through /users/attributes, it wins; higher, the stored one does. A fraction is rounded down, also as a decimal string ("17.9" is 17), a whole-number string is read as its number, and a range string as its lowest end ("13-17" is 13, "65+" is 65); any other value is ignored, never a 400.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/age`.
+                        internal var age: Swift.Int?
+                        /// Deprecated: send age instead. A YYYY-MM-DD date, or an ISO 8601 date-time with a zone, is turned into an age for this request only, then discarded; never stored or logged. If age is also sent, the younger of the two is used. An unreadable date is ignored, never a 400.
+                        ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/dateOfBirth`.
                         internal var dateOfBirth: Swift.String?
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/gender`.
                         internal var gender: Swift.String?
+                        /// BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
+                        ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/language`.
                         internal var language: Swift.String?
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/attributes/subscriptionTier`.
@@ -2087,9 +2185,10 @@ internal enum Operations {
                         ///   - countryCode: ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
                         ///   - latitude: Decimal degrees as string (e.g., "37.7749")
                         ///   - longitude: Decimal degrees as string (e.g., "-122.4194")
-                        ///   - dateOfBirth:
+                        ///   - age: Whole years, as an integer. If you hold only a RANGE, send its LOWEST end: "13-17" is sent as 13. Under 18 restricts this request to offers rated for that age, with no per-user personalisation. Used for this request only and never stored. Lower than an age stored through /users/attributes, it wins; higher, the stored one does. A fraction is rounded down, also as a decimal string ("17.9" is 17), a whole-number string is read as its number, and a range string as its lowest end ("13-17" is 13, "65+" is 65); any other value is ignored, never a 400.
+                        ///   - dateOfBirth: Deprecated: send age instead. A YYYY-MM-DD date, or an ISO 8601 date-time with a zone, is turned into an age for this request only, then discarded; never stored or logged. If age is also sent, the younger of the two is used. An unreadable date is ignored, never a 400.
                         ///   - gender:
-                        ///   - language:
+                        ///   - language: BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
                         ///   - subscriptionTier:
                         ///   - monthsSubscribed:
                         ///   - billingCycle:
@@ -2111,6 +2210,7 @@ internal enum Operations {
                             countryCode: Swift.String? = nil,
                             latitude: Swift.String? = nil,
                             longitude: Swift.String? = nil,
+                            age: Swift.Int? = nil,
                             dateOfBirth: Swift.String? = nil,
                             gender: Swift.String? = nil,
                             language: Swift.String? = nil,
@@ -2135,6 +2235,7 @@ internal enum Operations {
                             self.countryCode = countryCode
                             self.latitude = latitude
                             self.longitude = longitude
+                            self.age = age
                             self.dateOfBirth = dateOfBirth
                             self.gender = gender
                             self.language = language
@@ -2160,6 +2261,7 @@ internal enum Operations {
                             case countryCode
                             case latitude
                             case longitude
+                            case age
                             case dateOfBirth
                             case gender
                             case language
@@ -2212,10 +2314,29 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/placementId`.
                     internal var placementId: Swift.String?
+                    /// Which Encore surface is being filled. Ignored while OFFERS_SEARCH_RESOLVES_SURFACE is off. With it on and no variantId, the server resolves the variant for this use case (and the placementId pin) as GET /config does; a sent variantId always wins. Absent or unrecognised: today's behaviour (churn-intervention). Never a 400.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/useCase`.
+                    internal enum useCasePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case churn_hyphen_intervention = "churn-intervention"
+                        case post_hyphen_action_hyphen_reward = "post-action-reward"
+                    }
+                    /// Which Encore surface is being filled. Ignored while OFFERS_SEARCH_RESOLVES_SURFACE is off. With it on and no variantId, the server resolves the variant for this use case (and the placementId pin) as GET /config does; a sent variantId always wins. Absent or unrecognised: today's behaviour (churn-intervention). Never a 400.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/useCase`.
+                    internal var useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.useCasePayload?
                     /// Strict unlock mode: only include campaigns whose postback latency is less than or equal to this value (in milliseconds). Omit for no filtering. Bounded 1000..120000.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/maxPostbackTimeMs`.
                     internal var maxPostbackTimeMs: Swift.Int?
+                    /// Send only when this placement carries the app's own prize for a reward-for-trying Yes: the app's daily prize limit from its SDK configuration (PublisherRewardPolicy), clamped server-side to 1..10. The response then carries publisherRewardPromise. Omit it and nothing changes.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/publisherRewardDailyLimit`.
+                    internal var publisherRewardDailyLimit: Swift.Int?
+                    /// Why the client is searching. `purpose: "prefetch"` marks a search the SDK runs before any sheet is shown (a GiftsButton or ClaimReminder checking that offers exist). Its result may later back the sheet the user opens with a tap, so it is a served request like any other, not an impression. It is stamped as purpose on sdk_offer_requested so a report can split these out. Any other value is ignored, never a 400. Serving is identical either way.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/purpose`.
+                    internal var purpose: Swift.String?
                     /// Request-scoped serving context. Unknown keys are ignored.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/requestBody/json/context`.
@@ -2251,7 +2372,10 @@ internal enum Operations {
                     ///   - platform: Client platform: android, ios, or web
                     ///   - variantId: SDUI variant ID from frontend config fetch. If provided, filters creatives by variant assignment. If not provided, no variant filtering is applied.
                     ///   - placementId: Publisher-defined surface label for where the offer is shown (e.g. 'paywall', 'onboarding', 'settings'). Stamped onto the sdk_offer_requested event so publisher analytics can break the funnel out by placement. An Encore admin can also configure a per-placement offer rule for an app, in which case this label SELECTS and ORDERS the offers returned for that placement; with no rule configured, which is the default for every app, it stays analytics-only and changes nothing about what is served. Max 64 chars. SDKs may send their own auto-generated `placement_<8 hex>` id when the publisher supplied none — that is expected and is folded into the '(unlabeled)' bucket at read time; do NOT substitute '(unlabeled)' or an empty string yourself.
+                    ///   - useCase: Which Encore surface is being filled. Ignored while OFFERS_SEARCH_RESOLVES_SURFACE is off. With it on and no variantId, the server resolves the variant for this use case (and the placementId pin) as GET /config does; a sent variantId always wins. Absent or unrecognised: today's behaviour (churn-intervention). Never a 400.
                     ///   - maxPostbackTimeMs: Strict unlock mode: only include campaigns whose postback latency is less than or equal to this value (in milliseconds). Omit for no filtering. Bounded 1000..120000.
+                    ///   - publisherRewardDailyLimit: Send only when this placement carries the app's own prize for a reward-for-trying Yes: the app's daily prize limit from its SDK configuration (PublisherRewardPolicy), clamped server-side to 1..10. The response then carries publisherRewardPromise. Omit it and nothing changes.
+                    ///   - purpose: Why the client is searching. `purpose: "prefetch"` marks a search the SDK runs before any sheet is shown (a GiftsButton or ClaimReminder checking that offers exist). Its result may later back the sheet the user opens with a tap, so it is a served request like any other, not an impression. It is stamped as purpose on sdk_offer_requested so a report can split these out. Any other value is ignored, never a 400. Serving is identical either way.
                     ///   - context: Request-scoped serving context. Unknown keys are ignored.
                     internal init(
                         userId: Swift.String,
@@ -2263,7 +2387,10 @@ internal enum Operations {
                         platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.platformPayload? = nil,
                         variantId: Swift.String? = nil,
                         placementId: Swift.String? = nil,
+                        useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.useCasePayload? = nil,
                         maxPostbackTimeMs: Swift.Int? = nil,
+                        publisherRewardDailyLimit: Swift.Int? = nil,
+                        purpose: Swift.String? = nil,
                         context: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Input.Body.jsonPayload.contextPayload? = nil
                     ) {
                         self.userId = userId
@@ -2275,7 +2402,10 @@ internal enum Operations {
                         self.platform = platform
                         self.variantId = variantId
                         self.placementId = placementId
+                        self.useCase = useCase
                         self.maxPostbackTimeMs = maxPostbackTimeMs
+                        self.publisherRewardDailyLimit = publisherRewardDailyLimit
+                        self.purpose = purpose
                         self.context = context
                     }
                     internal enum CodingKeys: String, CodingKey {
@@ -2288,7 +2418,10 @@ internal enum Operations {
                         case platform
                         case variantId
                         case placementId
+                        case useCase
                         case maxPostbackTimeMs
+                        case publisherRewardDailyLimit
+                        case purpose
                         case context
                     }
                 }
@@ -2443,6 +2576,30 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/termsUrl`.
                             internal var termsUrl: Swift.String?
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal struct displayPropertiesPayload: Codable, Hashable, Sendable {
+                                /// A container of undocumented properties.
+                                internal var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                                /// Creates a new `displayPropertiesPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - additionalProperties: A container of undocumented properties.
+                                internal init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                                    self.additionalProperties = additionalProperties
+                                }
+                                internal init(from decoder: any Decoder) throws {
+                                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                }
+                                internal func encode(to encoder: any Encoder) throws {
+                                    try encoder.encodeAdditionalProperties(additionalProperties)
+                                }
+                            }
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal var displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload?
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/createdAt`.
                             internal var createdAt: Foundation.Date
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/updatedAt`.
@@ -2528,10 +2685,12 @@ internal enum Operations {
                                 internal var additionalImages: [Swift.String]?
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/ctaText`.
                                 internal var ctaText: Swift.String
-                                /// Optional override for campaign destinationUrl
+                                /// The campaign's destination, on a served creative; null where not served
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/destinationUrl`.
                                 internal var destinationUrl: Swift.String?
+                                /// The campaign's claim tracking, on a served creative; null where not served
+                                ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/trackingParameters`.
                                 internal struct trackingParametersPayload: Codable, Hashable, Sendable {
                                     /// A container of undocumented properties.
@@ -2550,6 +2709,8 @@ internal enum Operations {
                                         try encoder.encodeAdditionalProperties(additionalProperties)
                                     }
                                 }
+                                /// The campaign's claim tracking, on a served creative; null where not served
+                                ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/trackingParameters`.
                                 internal var trackingParameters: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayloadPayload.trackingParametersPayload?
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/weight`.
@@ -2573,25 +2734,33 @@ internal enum Operations {
                                     internal var subtitle: Swift.String
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/ctaButtonText`.
                                     internal var ctaButtonText: Swift.String?
+                                    /// Optional https image for this step. Absent: the step has none.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/imageUrl`.
+                                    internal var imageUrl: Swift.String?
                                     /// Creates a new `instructionsPayloadPayload`.
                                     ///
                                     /// - Parameters:
                                     ///   - title:
                                     ///   - subtitle:
                                     ///   - ctaButtonText:
+                                    ///   - imageUrl: Optional https image for this step. Absent: the step has none.
                                     internal init(
                                         title: Swift.String,
                                         subtitle: Swift.String,
-                                        ctaButtonText: Swift.String? = nil
+                                        ctaButtonText: Swift.String? = nil,
+                                        imageUrl: Swift.String? = nil
                                     ) {
                                         self.title = title
                                         self.subtitle = subtitle
                                         self.ctaButtonText = ctaButtonText
+                                        self.imageUrl = imageUrl
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case title
                                         case subtitle
                                         case ctaButtonText
+                                        case imageUrl
                                     }
                                 }
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/creativesPayload/instructions`.
@@ -2976,8 +3145,8 @@ internal enum Operations {
                                 ///   - logoUrl:
                                 ///   - additionalImages:
                                 ///   - ctaText:
-                                ///   - destinationUrl: Optional override for campaign destinationUrl
-                                ///   - trackingParameters:
+                                ///   - destinationUrl: The campaign's destination, on a served creative; null where not served
+                                ///   - trackingParameters: The campaign's claim tracking, on a served creative; null where not served
                                 ///   - weight:
                                 ///   - status:
                                 ///   - instructions:
@@ -3084,6 +3253,14 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/categoryGroup`.
                             internal var categoryGroup: Swift.String?
+                            /// `category` in the response locale, for display only. Group and filter on `category`, which stays English. Null when `category` is null. /offers/search only.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/categoryDisplayName`.
+                            internal var categoryDisplayName: Swift.String?
+                            /// `categoryGroup` in the response locale, for display only. Group on `categoryGroup`, which stays English. /offers/search only.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/categoryGroupDisplayName`.
+                            internal var categoryGroupDisplayName: Swift.String?
                             /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
@@ -3113,6 +3290,105 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
                             internal var rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload?
+                            /// Campaign claim-URL query parameters, keys verbatim (e.g. {"af_rid":"TRANSACTION_ID"}); equals the served creative's whenever one exists. Always pair it with the offer's destinationUrl, never with a creative's, and never build a claim URL from an absent or empty value. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/trackingParameters`.
+                            internal struct trackingParametersPayload: Codable, Hashable, Sendable {
+                                /// A container of undocumented properties.
+                                internal var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                                /// Creates a new `trackingParametersPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - additionalProperties: A container of undocumented properties.
+                                internal init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                                    self.additionalProperties = additionalProperties
+                                }
+                                internal init(from decoder: any Decoder) throws {
+                                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                }
+                                internal func encode(to encoder: any Encoder) throws {
+                                    try encoder.encodeAdditionalProperties(additionalProperties)
+                                }
+                            }
+                            /// Campaign claim-URL query parameters, keys verbatim (e.g. {"af_rid":"TRANSACTION_ID"}); equals the served creative's whenever one exists. Always pair it with the offer's destinationUrl, never with a creative's, and never build a claim URL from an absent or empty value. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/trackingParameters`.
+                            internal var trackingParameters: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.trackingParametersPayload?
+                            /// Campaign call-to-action text. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/ctaText`.
+                            internal var ctaText: Swift.String?
+                            /// Campaign description, localized like creatives. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/description`.
+                            internal var description: Swift.String?
+                            /// Step-by-step user instructions for completing the campaign offer via this creative. Enables A/B testing of instruction flows.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructionsPayload`.
+                            internal struct instructionsPayloadPayload: Codable, Hashable, Sendable {
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructionsPayload/title`.
+                                internal var title: Swift.String
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructionsPayload/subtitle`.
+                                internal var subtitle: Swift.String
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructionsPayload/ctaButtonText`.
+                                internal var ctaButtonText: Swift.String?
+                                /// Optional https image for this step. Absent: the step has none.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructionsPayload/imageUrl`.
+                                internal var imageUrl: Swift.String?
+                                /// Creates a new `instructionsPayloadPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - title:
+                                ///   - subtitle:
+                                ///   - ctaButtonText:
+                                ///   - imageUrl: Optional https image for this step. Absent: the step has none.
+                                internal init(
+                                    title: Swift.String,
+                                    subtitle: Swift.String,
+                                    ctaButtonText: Swift.String? = nil,
+                                    imageUrl: Swift.String? = nil
+                                ) {
+                                    self.title = title
+                                    self.subtitle = subtitle
+                                    self.ctaButtonText = ctaButtonText
+                                    self.imageUrl = imageUrl
+                                }
+                                internal enum CodingKeys: String, CodingKey {
+                                    case title
+                                    case subtitle
+                                    case ctaButtonText
+                                    case imageUrl
+                                }
+                            }
+                            /// Campaign step-by-step instructions, same shape as a creative's. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructions`.
+                            internal typealias instructionsPayload = [Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayloadPayload]
+                            /// Campaign step-by-step instructions, same shape as a creative's. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/instructions`.
+                            internal var instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayload?
+                            /// Campaign one-line instructions. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/quickInstructions`.
+                            internal var quickInstructions: Swift.String?
+                            /// Campaign logo override; null means use organization.logoUrl. Plain string, not format: uri, so one bad value cannot fail a whole Android decode. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/logoUrl`.
+                            internal var logoUrl: Swift.String?
+                            /// Campaign card title. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/title`.
+                            internal var title: Swift.String?
+                            /// Campaign card subtitle. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/subtitle`.
+                            internal var subtitle: Swift.String?
+                            /// Campaign tooltip text. Absent from servers that predate it; null means the campaign has none.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offersPayload/tooltipText`.
+                            internal var tooltipText: Swift.String?
                             /// Creates a new `offersPayloadPayload`.
                             ///
                             /// - Parameters:
@@ -3141,6 +3417,7 @@ internal enum Operations {
                             ///   - badgeLabel: Constrained promo badge for in-app offer cards: free_trial | discount. Drives the card pill display AND client-side free-trial-vs-discount logic. Clients map the enum to display text + free-trial boolean. NULL means no badge.
                             ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
                             ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - displayProperties: Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
                             ///   - createdAt:
                             ///   - updatedAt:
                             ///   - organization: Included when fetching with relations
@@ -3148,7 +3425,18 @@ internal enum Operations {
                             ///   - shareUrl: Opaque link a user can send to someone else for this campaign. A claim made through it attributes back to the user who shared it. MUST be absolute and http or https: both SDKs drop anything else while parsing, so a scheme-less or relative value reads as absent and no share control is drawn. ABSENT until share links ship, and a client that finds it absent must share nothing rather than falling back to another URL: an unattributed link loses the claim the share exists to carry. /offers/search only. Deliberately a plain string, not `format: uri`: that format makes the Kotlin generator emit java.net.URI, and a link its parser rejects would fail the WHOLE offers decode on Android rather than just the share button.
                             ///   - category: Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
                             ///   - categoryGroup: The gift-sheet group this campaign files under: "Watch & listen", "Money" or "Everyday". Derived from `category` by the server so a native chip strip shows what web tabs show without holding the taxonomy map. Always set: an absent, blank or unmapped category files under "Everyday", so every offer sits in some group. Whether a strip is worth drawing is the client's call, because only it knows which offers its sheet lists. /offers/search only: web-sdk holds its own copy of the map and groups `category` itself.
+                            ///   - categoryDisplayName: `category` in the response locale, for display only. Group and filter on `category`, which stays English. Null when `category` is null. /offers/search only.
+                            ///   - categoryGroupDisplayName: `categoryGroup` in the response locale, for display only. Group on `categoryGroup`, which stays English. /offers/search only.
                             ///   - rewardConfirmationTime: Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
+                            ///   - trackingParameters: Campaign claim-URL query parameters, keys verbatim (e.g. {"af_rid":"TRANSACTION_ID"}); equals the served creative's whenever one exists. Always pair it with the offer's destinationUrl, never with a creative's, and never build a claim URL from an absent or empty value. Absent from servers that predate it; null means the campaign has none.
+                            ///   - ctaText: Campaign call-to-action text. Absent from servers that predate it; null means the campaign has none.
+                            ///   - description: Campaign description, localized like creatives. Absent from servers that predate it; null means the campaign has none.
+                            ///   - instructions: Campaign step-by-step instructions, same shape as a creative's. Absent from servers that predate it; null means the campaign has none.
+                            ///   - quickInstructions: Campaign one-line instructions. Absent from servers that predate it; null means the campaign has none.
+                            ///   - logoUrl: Campaign logo override; null means use organization.logoUrl. Plain string, not format: uri, so one bad value cannot fail a whole Android decode. Absent from servers that predate it; null means the campaign has none.
+                            ///   - title: Campaign card title. Absent from servers that predate it; null means the campaign has none.
+                            ///   - subtitle: Campaign card subtitle. Absent from servers that predate it; null means the campaign has none.
+                            ///   - tooltipText: Campaign tooltip text. Absent from servers that predate it; null means the campaign has none.
                             internal init(
                                 id: Swift.String,
                                 organizationId: Swift.String,
@@ -3175,6 +3463,7 @@ internal enum Operations {
                                 badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
                                 heroImageUrl: Swift.String? = nil,
                                 termsUrl: Swift.String? = nil,
+                                displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload? = nil,
                                 createdAt: Foundation.Date,
                                 updatedAt: Foundation.Date,
                                 organization: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
@@ -3182,7 +3471,18 @@ internal enum Operations {
                                 shareUrl: Swift.String? = nil,
                                 category: Swift.String? = nil,
                                 categoryGroup: Swift.String? = nil,
-                                rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil
+                                categoryDisplayName: Swift.String? = nil,
+                                categoryGroupDisplayName: Swift.String? = nil,
+                                rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil,
+                                trackingParameters: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.trackingParametersPayload? = nil,
+                                ctaText: Swift.String? = nil,
+                                description: Swift.String? = nil,
+                                instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayload? = nil,
+                                quickInstructions: Swift.String? = nil,
+                                logoUrl: Swift.String? = nil,
+                                title: Swift.String? = nil,
+                                subtitle: Swift.String? = nil,
+                                tooltipText: Swift.String? = nil
                             ) {
                                 self.id = id
                                 self.organizationId = organizationId
@@ -3209,6 +3509,7 @@ internal enum Operations {
                                 self.badgeLabel = badgeLabel
                                 self.heroImageUrl = heroImageUrl
                                 self.termsUrl = termsUrl
+                                self.displayProperties = displayProperties
                                 self.createdAt = createdAt
                                 self.updatedAt = updatedAt
                                 self.organization = organization
@@ -3216,7 +3517,18 @@ internal enum Operations {
                                 self.shareUrl = shareUrl
                                 self.category = category
                                 self.categoryGroup = categoryGroup
+                                self.categoryDisplayName = categoryDisplayName
+                                self.categoryGroupDisplayName = categoryGroupDisplayName
                                 self.rewardConfirmationTime = rewardConfirmationTime
+                                self.trackingParameters = trackingParameters
+                                self.ctaText = ctaText
+                                self.description = description
+                                self.instructions = instructions
+                                self.quickInstructions = quickInstructions
+                                self.logoUrl = logoUrl
+                                self.title = title
+                                self.subtitle = subtitle
+                                self.tooltipText = tooltipText
                             }
                             internal enum CodingKeys: String, CodingKey {
                                 case id
@@ -3244,6 +3556,7 @@ internal enum Operations {
                                 case badgeLabel
                                 case heroImageUrl
                                 case termsUrl
+                                case displayProperties
                                 case createdAt
                                 case updatedAt
                                 case organization
@@ -3251,7 +3564,18 @@ internal enum Operations {
                                 case shareUrl
                                 case category
                                 case categoryGroup
+                                case categoryDisplayName
+                                case categoryGroupDisplayName
                                 case rewardConfirmationTime
+                                case trackingParameters
+                                case ctaText
+                                case description
+                                case instructions
+                                case quickInstructions
+                                case logoUrl
+                                case title
+                                case subtitle
+                                case tooltipText
                             }
                         }
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/offers`.
@@ -3317,6 +3641,10 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/locale`.
                         internal var locale: Swift.String?
+                        /// Whether this user is still under the app's daily prize limit (publisherRewardDailyLimit, rolling 24 hours). What counts depends on publisherRewardMode. on_yes (or no mode): prizes granted on a reward-for-trying Yes. on_verified: this user's verified completions that carried a reward, by when they verified; a Yes never grants and never counts, and the reward arrives on the offer_completed webhook. Present only when the request sent publisherRewardDailyLimit. Offers this user already completed or said Yes to are never served, so this answers the daily limit only. Absent (an older backend, or no limit sent) means no promise. Not a grant: in on_yes the self-report's granted answer is final.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/publisherRewardPromise`.
+                        internal var publisherRewardPromise: Swift.Bool?
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/200/content/json/error`.
                         internal var error: Swift.String?
                         /// Creates a new `jsonPayload`.
@@ -3326,18 +3654,21 @@ internal enum Operations {
                         ///   - offers:
                         ///   - metadata:
                         ///   - locale: Resolved locale served in this response (language-only, e.g. 'es'). Absent on pre-localization responses.
+                        ///   - publisherRewardPromise: Whether this user is still under the app's daily prize limit (publisherRewardDailyLimit, rolling 24 hours). What counts depends on publisherRewardMode. on_yes (or no mode): prizes granted on a reward-for-trying Yes. on_verified: this user's verified completions that carried a reward, by when they verified; a Yes never grants and never counts, and the reward arrives on the offer_completed webhook. Present only when the request sent publisherRewardDailyLimit. Offers this user already completed or said Yes to are never served, so this answers the daily limit only. Absent (an older backend, or no limit sent) means no promise. Not a grant: in on_yes the self-report's granted answer is final.
                         ///   - error:
                         internal init(
                             success: Swift.Bool,
                             offers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.offersPayload,
                             metadata: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_search.Output.Ok.Body.jsonPayload.metadataPayload,
                             locale: Swift.String? = nil,
+                            publisherRewardPromise: Swift.Bool? = nil,
                             error: Swift.String? = nil
                         ) {
                             self.success = success
                             self.offers = offers
                             self.metadata = metadata
                             self.locale = locale
+                            self.publisherRewardPromise = publisherRewardPromise
                             self.error = error
                         }
                         internal enum CodingKeys: String, CodingKey {
@@ -3345,6 +3676,7 @@ internal enum Operations {
                             case offers
                             case metadata
                             case locale
+                            case publisherRewardPromise
                             case error
                         }
                     }
@@ -3405,21 +3737,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/400/content/application\/json`.
@@ -3479,21 +3819,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/401/content/application\/json`.
@@ -3553,21 +3901,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/409/content/application\/json`.
@@ -3627,21 +3983,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/search/POST/responses/500/content/application\/json`.
@@ -3723,7 +4087,7 @@ internal enum Operations {
             }
         }
     }
-    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
+    /// Rebrokering catalog: the full set of offers your app may serve to a given end user, to render on your own surface. Two hard, server-enforced filters always apply: entitlement (your app's opt-outs + whitelist) and geo (offers not redeemable in the end user's country are dropped: non-redeemable offers are never returned). Serve path requires `userId` (a stable end-user identifier) and geo (`countryCode`, or the end user's IP forwarded via X-Forwarded-For); missing either is a 400. On the serve path, offers this end user already completed (a confirmed conversion, or a Yes they reported through an Encore SDK) are left out. Each returned creative carries a tokenized `clickUrl`: route the end user there on tap and it records an attributed transaction (bound to your app, the offer, the creative, and the userId) then 302s to the advertiser. Filter to your curated offer IDs and order CLIENT-SIDE, falling back to other returned offers so your surface is never empty (the server does not narrow to your picks). Set `includeAllRegions: true` for config-time discovery of your full addressable inventory (skips geo, needs no userId, returns no clickUrls; each offer carries targetCountries); not for display. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/offers/catalog`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/offers/catalog/post`.
@@ -3746,7 +4110,7 @@ internal enum Operations {
             internal enum Body: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json`.
                 internal struct jsonPayload: Codable, Hashable, Sendable {
-                    /// Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), and it drives per-user fraud controls (trial caps, retake blocking) at click time. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls).
+                    /// Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), it drives per-user fraud controls (trial caps, retake blocking) at click time, and on the serve path it leaves out offers this user already completed. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls).
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/userId`.
                     internal var userId: Swift.String?
@@ -3774,6 +4138,10 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/placementId`.
                     internal var placementId: Swift.String?
+                    /// Optional BCP 47 language tag (e.g. "es", "pt-BR"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/language`.
+                    internal var language: Swift.String?
                     /// CONFIG-TIME ONLY. When true, skips geo-filtering and returns the full addressable inventory for your app (entitlement still applies), with each offer's targetCountries — use this to build your curation. Do NOT use for offers displayed to an end user; those must come from a geo-scoped request (countryCode or forwarded IP). When true, no geography signal is required and countryCode is ignored.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/requestBody/json/includeAllRegions`.
@@ -3789,11 +4157,12 @@ internal enum Operations {
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
-                    ///   - userId: Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), and it drives per-user fraud controls (trial caps, retake blocking) at click time. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls).
+                    ///   - userId: Stable identifier for the END USER you are rendering offers to (any opaque string; does not need to be PII). REQUIRED on the serve path — it is bound into each offer's clickUrl so a click records a transaction attributed to (your app, the offer, the creative, this user), it drives per-user fraud controls (trial caps, retake blocking) at click time, and on the serve path it leaves out offers this user already completed. Use the same value across renders for the same user. Not required when includeAllRegions is set (config mode returns no clickUrls).
                     ///   - clientId: Optional identifier for the operator/sub-publisher on whose behalf offers are shown. Carried through as an analytics dimension. Defaults to userId when omitted.
                     ///   - countryCode: ISO 3166-1 alpha-2 country code of the END USER the offers will be shown to (e.g. "US", "GB"). Provides the geography signal for geo-filtering. Resolution: this value → client IP (X-Forwarded-For aware) → (rejected if neither resolves). Send it when calling server-to-server without forwarding the end user's IP; omit it when the end user (or a proxy forwarding their IP) is the caller. Ignored when includeAllRegions is true.
                     ///   - platform: Optional device family of the END USER the offers will be shown to (enum; any other value is rejected with 400). Analytics dimension only (platform on the serve event); never 'api'.
                     ///   - placementId: Optional publisher-defined label for the surface this offer is shown on (e.g. 'cancel_flow', 'home_feed', 'post_purchase'). Stamped onto the impression AND onto the click it produces, so publisher analytics can break the funnel out by placement. Normalised server-side: a blank value is treated as absent, anything longer than 64 characters is TRUNCATED rather than rejected, and the stored label NEVER carries leading or trailing whitespace, including after truncation, so ' my label ' and 'my label' are always one placement and can never show up as two rows. Case IS significant: 'Cancel_Flow' and 'cancel_flow' are different placements. Omit it and this traffic groups under '(unlabeled)', the same bucket as an SDK integration that supplies no placement. A per-placement offer rule NEVER applies here. `/offers/catalog` returns inventory rather than a served set, so a rule configured for this label does not select or order what comes back. Scope an inventory pull on your own filters, never on a rule.
+                    ///   - language: Optional BCP 47 language tag (e.g. "es", "pt-BR"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE.
                     ///   - includeAllRegions: CONFIG-TIME ONLY. When true, skips geo-filtering and returns the full addressable inventory for your app (entitlement still applies), with each offer's targetCountries — use this to build your curation. Do NOT use for offers displayed to an end user; those must come from a geo-scoped request (countryCode or forwarded IP). When true, no geography signal is required and countryCode is ignored.
                     ///   - limit: Optional page size (1..100). OMIT to return ALL eligible offers (the default) — catalogs are small enough that you normally take the whole set and curate client-side. Provide only if you want to page (with offset).
                     ///   - offset: Pagination offset (default 0). Only meaningful together with limit.
@@ -3803,6 +4172,7 @@ internal enum Operations {
                         countryCode: Swift.String? = nil,
                         platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Input.Body.jsonPayload.platformPayload? = nil,
                         placementId: Swift.String? = nil,
+                        language: Swift.String? = nil,
                         includeAllRegions: Swift.Bool? = nil,
                         limit: Swift.Int? = nil,
                         offset: Swift.Int? = nil
@@ -3812,6 +4182,7 @@ internal enum Operations {
                         self.countryCode = countryCode
                         self.platform = platform
                         self.placementId = placementId
+                        self.language = language
                         self.includeAllRegions = includeAllRegions
                         self.limit = limit
                         self.offset = offset
@@ -3822,6 +4193,7 @@ internal enum Operations {
                         case countryCode
                         case platform
                         case placementId
+                        case language
                         case includeAllRegions
                         case limit
                         case offset
@@ -3891,6 +4263,30 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/termsUrl`.
                             internal var termsUrl: Swift.String?
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal struct displayPropertiesPayload: Codable, Hashable, Sendable {
+                                /// A container of undocumented properties.
+                                internal var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                                /// Creates a new `displayPropertiesPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - additionalProperties: A container of undocumented properties.
+                                internal init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                                    self.additionalProperties = additionalProperties
+                                }
+                                internal init(from decoder: any Decoder) throws {
+                                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                }
+                                internal func encode(to encoder: any Encoder) throws {
+                                    try encoder.encodeAdditionalProperties(additionalProperties)
+                                }
+                            }
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal var displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload?
                             /// Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/rewardConfirmationTime`.
@@ -4005,25 +4401,33 @@ internal enum Operations {
                                     internal var subtitle: Swift.String
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/ctaButtonText`.
                                     internal var ctaButtonText: Swift.String?
+                                    /// Optional https image for this step. Absent: the step has none.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/200/content/json/offersPayload/creativesPayload/instructionsPayload/imageUrl`.
+                                    internal var imageUrl: Swift.String?
                                     /// Creates a new `instructionsPayloadPayload`.
                                     ///
                                     /// - Parameters:
                                     ///   - title:
                                     ///   - subtitle:
                                     ///   - ctaButtonText:
+                                    ///   - imageUrl: Optional https image for this step. Absent: the step has none.
                                     internal init(
                                         title: Swift.String,
                                         subtitle: Swift.String,
-                                        ctaButtonText: Swift.String? = nil
+                                        ctaButtonText: Swift.String? = nil,
+                                        imageUrl: Swift.String? = nil
                                     ) {
                                         self.title = title
                                         self.subtitle = subtitle
                                         self.ctaButtonText = ctaButtonText
+                                        self.imageUrl = imageUrl
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case title
                                         case subtitle
                                         case ctaButtonText
+                                        case imageUrl
                                     }
                                 }
                                 /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
@@ -4115,6 +4519,7 @@ internal enum Operations {
                             ///   - targetCountries:
                             ///   - isDemo: When true, this is a demo offer: a fictional brand served only to pk_test_* keys so an integration can be exercised end to end without contacting a real advertiser. Surface it as such rather than presenting it as real inventory. Absent or false means ordinary inventory.
                             ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - displayProperties: Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
                             ///   - rewardConfirmationTime: Estimated time from the user tapping this offer to the reward being confirmed, from recent real conversions (on demo offers, from the demo advertiser's configured behavior instead). Half confirm within medianSeconds, 9 in 10 within p90Seconds. Not a guarantee: to show a wait, use p90Seconds. Null when there is no current estimate (too few recent conversions, data more than 7 days old, or an offer that does not confirm through the advertiser); say nothing about timing then.
                             ///   - organization:
                             ///   - creatives:
@@ -4128,6 +4533,7 @@ internal enum Operations {
                                 targetCountries: [Swift.String],
                                 isDemo: Swift.Bool? = nil,
                                 termsUrl: Swift.String? = nil,
+                                displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload? = nil,
                                 rewardConfirmationTime: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.rewardConfirmationTimePayload? = nil,
                                 organization: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.organizationPayload? = nil,
                                 creatives: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_catalog.Output.Ok.Body.jsonPayload.offersPayloadPayload.creativesPayload? = nil
@@ -4141,6 +4547,7 @@ internal enum Operations {
                                 self.targetCountries = targetCountries
                                 self.isDemo = isDemo
                                 self.termsUrl = termsUrl
+                                self.displayProperties = displayProperties
                                 self.rewardConfirmationTime = rewardConfirmationTime
                                 self.organization = organization
                                 self.creatives = creatives
@@ -4155,6 +4562,7 @@ internal enum Operations {
                                 case targetCountries
                                 case isDemo
                                 case termsUrl
+                                case displayProperties
                                 case rewardConfirmationTime
                                 case organization
                                 case creatives
@@ -4295,21 +4703,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/400/content/application\/json`.
@@ -4369,21 +4785,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/401/content/application\/json`.
@@ -4443,21 +4867,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/catalog/POST/responses/500/content/application\/json`.
@@ -4578,7 +5010,7 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/countryCode`.
                         internal var countryCode: Swift.String
-                        /// BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es').
+                        /// BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/language`.
                         internal var language: Swift.String
@@ -4594,25 +5026,296 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/platform`.
                         internal var platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.platformPayload?
+                        /// Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/osVersion`.
+                        internal var osVersion: Swift.String?
+                        /// The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/userAgent`.
+                        internal var userAgent: Swift.String?
+                        /// Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/advertisingId`.
+                        internal var advertisingId: Swift.String?
+                        /// True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/limitAdTracking`.
+                        internal struct limitAdTrackingPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/limitAdTracking/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/limitAdTracking/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/limitAdTracking/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `limitAdTrackingPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/limitAdTracking`.
+                        internal var limitAdTracking: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.limitAdTrackingPayload?
+                        /// OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/doNotTrack`.
+                        internal struct doNotTrackPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/doNotTrack/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/doNotTrack/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/doNotTrack/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `doNotTrackPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/doNotTrack`.
+                        internal var doNotTrack: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.doNotTrackPayload?
+                        /// Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/deviceIp`.
+                        internal var deviceIp: Swift.String?
+                        /// OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gdprApplies`.
+                        internal struct gdprAppliesPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gdprApplies/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gdprApplies/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gdprApplies/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `gdprAppliesPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gdprApplies`.
+                        internal var gdprApplies: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.gdprAppliesPayload?
+                        /// IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/consentString`.
+                        internal var consentString: Swift.String?
+                        /// IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gpp`.
+                        internal var gpp: Swift.String?
+                        /// GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/gppSid`.
+                        internal var gppSid: [Swift.Int]?
+                        /// IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/requestBody/json/attributes/usPrivacy`.
+                        internal var usPrivacy: Swift.String?
                         /// Creates a new `attributesPayload`.
                         ///
                         /// - Parameters:
                         ///   - countryCode: ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
-                        ///   - language: BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es').
+                        ///   - language: BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
                         ///   - platform: Recipient's device platform — drives creative compatibility filtering. Optional: omit for a platform='api' app to receive all eligible offers untrimmed; device-SDK apps always send it. 'api' is not a valid value here.
+                        ///   - osVersion: Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored.
+                        ///   - userAgent: The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored.
+                        ///   - advertisingId: Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent.
+                        ///   - limitAdTracking: True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///   - doNotTrack: OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///   - deviceIp: Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored.
+                        ///   - gdprApplies: OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///   - consentString: IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored.
+                        ///   - gpp: IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out.
+                        ///   - gppSid: GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out.
+                        ///   - usPrivacy: IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out.
                         internal init(
                             countryCode: Swift.String,
                             language: Swift.String,
-                            platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.platformPayload? = nil
+                            platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.platformPayload? = nil,
+                            osVersion: Swift.String? = nil,
+                            userAgent: Swift.String? = nil,
+                            advertisingId: Swift.String? = nil,
+                            limitAdTracking: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.limitAdTrackingPayload? = nil,
+                            doNotTrack: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.doNotTrackPayload? = nil,
+                            deviceIp: Swift.String? = nil,
+                            gdprApplies: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_message.Input.Body.jsonPayload.attributesPayload.gdprAppliesPayload? = nil,
+                            consentString: Swift.String? = nil,
+                            gpp: Swift.String? = nil,
+                            gppSid: [Swift.Int]? = nil,
+                            usPrivacy: Swift.String? = nil
                         ) {
                             self.countryCode = countryCode
                             self.language = language
                             self.platform = platform
+                            self.osVersion = osVersion
+                            self.userAgent = userAgent
+                            self.advertisingId = advertisingId
+                            self.limitAdTracking = limitAdTracking
+                            self.doNotTrack = doNotTrack
+                            self.deviceIp = deviceIp
+                            self.gdprApplies = gdprApplies
+                            self.consentString = consentString
+                            self.gpp = gpp
+                            self.gppSid = gppSid
+                            self.usPrivacy = usPrivacy
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case countryCode
                             case language
                             case platform
+                            case osVersion
+                            case userAgent
+                            case advertisingId
+                            case limitAdTracking
+                            case doNotTrack
+                            case deviceIp
+                            case gdprApplies
+                            case consentString
+                            case gpp
+                            case gppSid
+                            case usPrivacy
                         }
                     }
                     /// Targeting attributes — countryCode and language are required; platform is optional (omit for a platform='api' app to receive all offers untrimmed).
@@ -4843,21 +5546,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/401/content/application\/json`.
@@ -4917,21 +5628,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/409/content/application\/json`.
@@ -4991,21 +5710,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/message/POST/responses/500/content/application\/json`.
@@ -5126,7 +5853,7 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/countryCode`.
                         internal var countryCode: Swift.String
-                        /// BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es').
+                        /// BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/language`.
                         internal var language: Swift.String
@@ -5142,25 +5869,296 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/platform`.
                         internal var platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.platformPayload?
+                        /// Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/osVersion`.
+                        internal var osVersion: Swift.String?
+                        /// The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/userAgent`.
+                        internal var userAgent: Swift.String?
+                        /// Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/advertisingId`.
+                        internal var advertisingId: Swift.String?
+                        /// True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/limitAdTracking`.
+                        internal struct limitAdTrackingPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/limitAdTracking/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/limitAdTracking/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/limitAdTracking/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `limitAdTrackingPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/limitAdTracking`.
+                        internal var limitAdTracking: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.limitAdTrackingPayload?
+                        /// OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/doNotTrack`.
+                        internal struct doNotTrackPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/doNotTrack/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/doNotTrack/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/doNotTrack/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `doNotTrackPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/doNotTrack`.
+                        internal var doNotTrack: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.doNotTrackPayload?
+                        /// Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/deviceIp`.
+                        internal var deviceIp: Swift.String?
+                        /// OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gdprApplies`.
+                        internal struct gdprAppliesPayload: Codable, Hashable, Sendable {
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gdprApplies/value1`.
+                            internal var value1: Swift.Bool?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gdprApplies/value2`.
+                            internal var value2: Swift.Double?
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gdprApplies/value3`.
+                            internal var value3: Swift.Double?
+                            /// Creates a new `gdprAppliesPayload`.
+                            ///
+                            /// - Parameters:
+                            ///   - value1:
+                            ///   - value2:
+                            ///   - value3:
+                            internal init(
+                                value1: Swift.Bool? = nil,
+                                value2: Swift.Double? = nil,
+                                value3: Swift.Double? = nil
+                            ) {
+                                self.value1 = value1
+                                self.value2 = value2
+                                self.value3 = value3
+                            }
+                            internal init(from decoder: any Decoder) throws {
+                                var errors: [any Error] = []
+                                do {
+                                    self.value1 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value2 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                do {
+                                    self.value3 = try decoder.decodeFromSingleValueContainer()
+                                } catch {
+                                    errors.append(error)
+                                }
+                                try Swift.DecodingError.verifyAtLeastOneSchemaIsNotNil(
+                                    [
+                                        self.value1,
+                                        self.value2,
+                                        self.value3
+                                    ],
+                                    type: Self.self,
+                                    codingPath: decoder.codingPath,
+                                    errors: errors
+                                )
+                            }
+                            internal func encode(to encoder: any Encoder) throws {
+                                try encoder.encodeFirstNonNilValueToSingleValueContainer([
+                                    self.value1,
+                                    self.value2,
+                                    self.value3
+                                ])
+                            }
+                        }
+                        /// OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gdprApplies`.
+                        internal var gdprApplies: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.gdprAppliesPayload?
+                        /// IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/consentString`.
+                        internal var consentString: Swift.String?
+                        /// IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gpp`.
+                        internal var gpp: Swift.String?
+                        /// GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/gppSid`.
+                        internal var gppSid: [Swift.Int]?
+                        /// IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/requestBody/json/attributes/usPrivacy`.
+                        internal var usPrivacy: Swift.String?
                         /// Creates a new `attributesPayload`.
                         ///
                         /// - Parameters:
                         ///   - countryCode: ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
-                        ///   - language: BCP 47 language tag — drives creative locale resolution (e.g., 'en', 'es').
+                        ///   - language: BCP 47 language tag; only the language subtag is used for creative locale resolution, and only when the app has that language enabled. Falls back to Accept-Language, then the app default locale.
                         ///   - platform: Recipient's device platform — drives creative compatibility filtering. Optional: omit for a platform='api' app to receive all eligible offers untrimmed; device-SDK apps always send it. 'api' is not a valid value here.
+                        ///   - osVersion: Device OS version, e.g. '14' or '17.5.1'. Optional; a malformed value is ignored.
+                        ///   - userAgent: The END DEVICE's user agent, not the caller's. On the API lane the publisher's server calls us, so the header we see is theirs. Optional; a malformed value is ignored.
+                        ///   - advertisingId: Device advertising id, unhashed: IDFA on iOS, GAID/GPID on Android. Optional, and accepted only from an app whose `deviceIdentifiersMode` is enabled and which is not declared for children or likely used by them; ignored otherwise. Must be a UUID; an all-zero id reads as absent.
+                        ///   - limitAdTracking: True when the user has limited ad tracking. Accepts OpenRTB's 0/1 integer too. A consent signal, not a device attribute. Optional; a malformed value counts as true.
+                        ///   - doNotTrack: OpenRTB `device.dnt`. A consent signal like `limitAdTracking`, and equally underivable. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///   - deviceIp: Public IPv4 or IPv6 address of the END DEVICE, never your server's. Same gate as `advertisingId`. Optional; a malformed, private or reserved address is ignored.
+                        ///   - gdprApplies: OpenRTB `regs.gdpr`: true when GDPR applies to this user. Accepts 0/1 too. Optional; a malformed value counts as true.
+                        ///   - consentString: IAB TCF consent string from your consent tool, forwarded as `user.consent`. Optional; a malformed value is ignored.
+                        ///   - gpp: IAB Global Privacy Platform string, forwarded as `regs.gpp`. Optional; a malformed value counts as an opt-out.
+                        ///   - gppSid: GPP section ids in force, forwarded as `regs.gpp_sid`. Optional; a malformed value counts as an opt-out.
+                        ///   - usPrivacy: IAB US Privacy string, e.g. '1YNN', forwarded as `regs.us_privacy`. Optional; a malformed value counts as an opt-out.
                         internal init(
                             countryCode: Swift.String,
                             language: Swift.String,
-                            platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.platformPayload? = nil
+                            platform: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.platformPayload? = nil,
+                            osVersion: Swift.String? = nil,
+                            userAgent: Swift.String? = nil,
+                            advertisingId: Swift.String? = nil,
+                            limitAdTracking: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.limitAdTrackingPayload? = nil,
+                            doNotTrack: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.doNotTrackPayload? = nil,
+                            deviceIp: Swift.String? = nil,
+                            gdprApplies: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Input.Body.jsonPayload.attributesPayload.gdprAppliesPayload? = nil,
+                            consentString: Swift.String? = nil,
+                            gpp: Swift.String? = nil,
+                            gppSid: [Swift.Int]? = nil,
+                            usPrivacy: Swift.String? = nil
                         ) {
                             self.countryCode = countryCode
                             self.language = language
                             self.platform = platform
+                            self.osVersion = osVersion
+                            self.userAgent = userAgent
+                            self.advertisingId = advertisingId
+                            self.limitAdTracking = limitAdTracking
+                            self.doNotTrack = doNotTrack
+                            self.deviceIp = deviceIp
+                            self.gdprApplies = gdprApplies
+                            self.consentString = consentString
+                            self.gpp = gpp
+                            self.gppSid = gppSid
+                            self.usPrivacy = usPrivacy
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case countryCode
                             case language
                             case platform
+                            case osVersion
+                            case userAgent
+                            case advertisingId
+                            case limitAdTracking
+                            case doNotTrack
+                            case deviceIp
+                            case gdprApplies
+                            case consentString
+                            case gpp
+                            case gppSid
+                            case usPrivacy
                         }
                     }
                     /// Targeting attributes — countryCode and language are required; platform is optional (omit for a platform='api' app to receive all offers untrimmed).
@@ -5294,6 +6292,30 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/termsUrl`.
                             internal var termsUrl: Swift.String?
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal struct displayPropertiesPayload: Codable, Hashable, Sendable {
+                                /// A container of undocumented properties.
+                                internal var additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer]
+                                /// Creates a new `displayPropertiesPayload`.
+                                ///
+                                /// - Parameters:
+                                ///   - additionalProperties: A container of undocumented properties.
+                                internal init(additionalProperties: [String: OpenAPIRuntime.OpenAPIValueContainer] = .init()) {
+                                    self.additionalProperties = additionalProperties
+                                }
+                                internal init(from decoder: any Decoder) throws {
+                                    additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                }
+                                internal func encode(to encoder: any Encoder) throws {
+                                    try encoder.encodeAdditionalProperties(additionalProperties)
+                                }
+                            }
+                            /// Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/displayProperties`.
+                            internal var displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload?
                             /// Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/category`.
@@ -5308,25 +6330,33 @@ internal enum Operations {
                                 internal var subtitle: Swift.String
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload/ctaButtonText`.
                                 internal var ctaButtonText: Swift.String?
+                                /// Optional https image for this step. Absent: the step has none.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/200/content/json/offersPayload/instructionsPayload/imageUrl`.
+                                internal var imageUrl: Swift.String?
                                 /// Creates a new `instructionsPayloadPayload`.
                                 ///
                                 /// - Parameters:
                                 ///   - title:
                                 ///   - subtitle:
                                 ///   - ctaButtonText:
+                                ///   - imageUrl: Optional https image for this step. Absent: the step has none.
                                 internal init(
                                     title: Swift.String,
                                     subtitle: Swift.String,
-                                    ctaButtonText: Swift.String? = nil
+                                    ctaButtonText: Swift.String? = nil,
+                                    imageUrl: Swift.String? = nil
                                 ) {
                                     self.title = title
                                     self.subtitle = subtitle
                                     self.ctaButtonText = ctaButtonText
+                                    self.imageUrl = imageUrl
                                 }
                                 internal enum CodingKeys: String, CodingKey {
                                     case title
                                     case subtitle
                                     case ctaButtonText
+                                    case imageUrl
                                 }
                             }
                             /// Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
@@ -5387,6 +6417,7 @@ internal enum Operations {
                             ///   - badgeLabel: Constrained promo badge for the in-app offer card: "free_trial" | "discount", or null when the campaign has none. Clients map the enum to display text ("Free trial" / "Discount") and free-trial-vs-discount logic.
                             ///   - heroImageUrl: Fixed presentation image for gift reward surfaces. Null or absent: use the creative primaryImageUrl.
                             ///   - termsUrl: https link to the advertiser offer terms. Null or absent: render terms copy as plain text.
+                            ///   - displayProperties: Display-only strings a variant renders by key, e.g. {"eligibilityNote":"New subscribers only"}. Values are strings; the type is free-form so one unexpected value cannot fail a client decode. Absent or empty: the variant draws none of those lines.
                             ///   - category: Display name of the campaign category, e.g. "Music and Audio". Free string: the taxonomy is admin-editable, so accept any value.
                             ///   - instructions: Step by step instructions from the creative, translated like the title. Null or absent: the creative has none.
                             ///   - quickInstructions: A short one line version of the instructions, e.g. "sign up, complete one survey". Null or absent: the creative has none.
@@ -5406,6 +6437,7 @@ internal enum Operations {
                                 badgeLabel: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.badgeLabelPayload? = nil,
                                 heroImageUrl: Swift.String? = nil,
                                 termsUrl: Swift.String? = nil,
+                                displayProperties: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.displayPropertiesPayload? = nil,
                                 category: Swift.String? = nil,
                                 instructions: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_offers_sol_feed.Output.Ok.Body.jsonPayload.offersPayloadPayload.instructionsPayload? = nil,
                                 quickInstructions: Swift.String? = nil,
@@ -5425,6 +6457,7 @@ internal enum Operations {
                                 self.badgeLabel = badgeLabel
                                 self.heroImageUrl = heroImageUrl
                                 self.termsUrl = termsUrl
+                                self.displayProperties = displayProperties
                                 self.category = category
                                 self.instructions = instructions
                                 self.quickInstructions = quickInstructions
@@ -5445,6 +6478,7 @@ internal enum Operations {
                                 case badgeLabel
                                 case heroImageUrl
                                 case termsUrl
+                                case displayProperties
                                 case category
                                 case instructions
                                 case quickInstructions
@@ -5533,21 +6567,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/401/content/application\/json`.
@@ -5607,21 +6649,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/409/content/application\/json`.
@@ -5681,21 +6731,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/feed/POST/responses/500/content/application\/json`.
@@ -5936,21 +6994,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/400/content/application\/json`.
@@ -6010,21 +7076,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/401/content/application\/json`.
@@ -6084,21 +7158,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/offers/impressions/{impression_uid}/delivered/POST/responses/500/content/application\/json`.
@@ -6180,7 +7262,7 @@ internal enum Operations {
             }
         }
     }
-    /// Create a new transaction for a specific campaign
+    /// Create a new transaction for a specific campaign. 409 with code 'offerAlreadyCompleted' when this user already completed the offer, or said Yes to it through a self-report: drop the offer from the list rather than retrying. The app-wide trial-limit 409 carries no code.
     ///
     /// - Remark: HTTP `POST /publisher/sdk/v1/transactions`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/post`.
@@ -6218,25 +7300,33 @@ internal enum Operations {
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/requestBody/json/useCase`.
                     internal var useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input.Body.jsonPayload.useCasePayload?
+                    /// The id of the variant whose remote template rendered this sheet. Absent when the embedded floor rendered. A per-offer reward is frozen on the transaction only when this variant shows per-offer reward values; absent, malformed or unknown means none is frozen. Never a 400.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/requestBody/json/variantId`.
+                    internal var variantId: Swift.String?
                     /// Creates a new `jsonPayload`.
                     ///
                     /// - Parameters:
                     ///   - campaignId:
                     ///   - userId:
                     ///   - useCase: Which Encore surface the user claimed from. Persisted on the transaction so the server-side completion — which is built from that row alone and carries no client context — can be split by use case, along with the payout booked on it. Absent means 'churn-intervention'.
+                    ///   - variantId: The id of the variant whose remote template rendered this sheet. Absent when the embedded floor rendered. A per-offer reward is frozen on the transaction only when this variant shows per-offer reward values; absent, malformed or unknown means none is frozen. Never a 400.
                     internal init(
                         campaignId: Swift.String,
                         userId: Swift.String,
-                        useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input.Body.jsonPayload.useCasePayload? = nil
+                        useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Input.Body.jsonPayload.useCasePayload? = nil,
+                        variantId: Swift.String? = nil
                     ) {
                         self.campaignId = campaignId
                         self.userId = userId
                         self.useCase = useCase
+                        self.variantId = variantId
                     }
                     internal enum CodingKeys: String, CodingKey {
                         case campaignId
                         case userId
                         case useCase
+                        case variantId
                     }
                 }
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/requestBody/content/application\/json`.
@@ -6372,21 +7462,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/400/content/application\/json`.
@@ -6446,21 +7544,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/401/content/application\/json`.
@@ -6520,21 +7626,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/404/content/application\/json`.
@@ -6594,21 +7708,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/409/content/application\/json`.
@@ -6668,21 +7790,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/POST/responses/500/content/application\/json`.
@@ -6721,6 +7851,608 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.internalServerError`.
             /// - SeeAlso: `.internalServerError`.
             internal var internalServerError: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions.Output.InternalServerError {
+                get throws {
+                    switch self {
+                    case let .internalServerError(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "internalServerError",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Reserve the transaction id to substitute for TRANSACTION_ID when preloading an offer link before the claim tap. Not a claim: nothing is counted, stamped or frozen until POST /transactions, which returns this same id when it comes within 30 minutes of the last preload. Send the claim's body. 409 with code 'preloadUnsupported' when this offer's link must not be loaded before a tap; 409 'offerAlreadyCompleted' and the trial-limit 409 as on the claim. Treat any non-200 as no preload.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/preload`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post`.
+    internal enum post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload {
+        internal static let id: Swift.String = "post/publisher/sdk/v1/transactions/preload"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Headers
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json`.
+                internal struct jsonPayload: Codable, Hashable, Sendable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json/campaignId`.
+                    internal var campaignId: Swift.String
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json/userId`.
+                    internal var userId: Swift.String
+                    /// Accepted so the claim's body can be sent unchanged; ignored. The claim stamps it.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json/useCase`.
+                    internal enum useCasePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                        case churn_hyphen_intervention = "churn-intervention"
+                        case post_hyphen_action_hyphen_reward = "post-action-reward"
+                    }
+                    /// Accepted so the claim's body can be sent unchanged; ignored. The claim stamps it.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json/useCase`.
+                    internal var useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body.jsonPayload.useCasePayload?
+                    /// Accepted so the claim's body can be sent unchanged; ignored. Never a 400.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/json/variantId`.
+                    internal var variantId: Swift.String?
+                    /// Creates a new `jsonPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - campaignId:
+                    ///   - userId:
+                    ///   - useCase: Accepted so the claim's body can be sent unchanged; ignored. The claim stamps it.
+                    ///   - variantId: Accepted so the claim's body can be sent unchanged; ignored. Never a 400.
+                    internal init(
+                        campaignId: Swift.String,
+                        userId: Swift.String,
+                        useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body.jsonPayload.useCasePayload? = nil,
+                        variantId: Swift.String? = nil
+                    ) {
+                        self.campaignId = campaignId
+                        self.userId = userId
+                        self.useCase = useCase
+                        self.variantId = variantId
+                    }
+                    internal enum CodingKeys: String, CodingKey {
+                        case campaignId
+                        case userId
+                        case useCase
+                        case variantId
+                    }
+                }
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/requestBody/content/application\/json`.
+                case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body.jsonPayload)
+            }
+            internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Headers = .init(),
+                body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/200/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/200/content/json/success`.
+                        internal var success: Swift.Bool
+                        /// The id to substitute for TRANSACTION_ID in the preloaded offer link. The claim returns the same id when it comes within 30 minutes of the last preload; any other id means discard the preload.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/200/content/json/transactionId`.
+                        internal var transactionId: Swift.String
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - success:
+                        ///   - transactionId: The id to substitute for TRANSACTION_ID in the preloaded offer link. The claim returns the same id when it comes within 30 minutes of the last preload; any other id means discard the preload.
+                        internal init(
+                            success: Swift.Bool,
+                            transactionId: Swift.String
+                        ) {
+                            self.success = success
+                            self.transactionId = transactionId
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case success
+                            case transactionId
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/200/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/400/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            internal var badRequest: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct Unauthorized: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/401/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized.Body
+                /// Creates a new `Unauthorized`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            internal var unauthorized: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/404/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound.Body
+                /// Creates a new `NotFound`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound)
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/409/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            internal var conflict: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct InternalServerError: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/preload/POST/responses/500/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError.Body
+                /// Creates a new `InternalServerError`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/preload/post/responses/500`.
+            ///
+            /// HTTP response code: `500 internalServerError`.
+            case internalServerError(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError)
+            /// The associated value of the enum case if `self` is `.internalServerError`.
+            ///
+            /// - Throws: An error if `self` is not `.internalServerError`.
+            /// - SeeAlso: `.internalServerError`.
+            internal var internalServerError: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol_preload.Output.InternalServerError {
                 get throws {
                     switch self {
                     case let .internalServerError(response):
@@ -6926,21 +8658,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/400/content/application\/json`.
@@ -7000,21 +8740,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/401/content/application\/json`.
@@ -7074,21 +8822,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/404/content/application\/json`.
@@ -7148,21 +8904,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/409/content/application\/json`.
@@ -7222,21 +8986,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/signals/POST/responses/500/content/application\/json`.
@@ -7275,6 +9047,564 @@ internal enum Operations {
             /// - Throws: An error if `self` is not `.internalServerError`.
             /// - SeeAlso: `.internalServerError`.
             internal var internalServerError: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_signals.Output.InternalServerError {
+                get throws {
+                    switch self {
+                    case let .internalServerError(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "internalServerError",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Undocumented response.
+            ///
+            /// A response with a code that is not documented in the OpenAPI document.
+            case undocumented(statusCode: Swift.Int, OpenAPIRuntime.UndocumentedPayload)
+        }
+        internal enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            internal init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            internal var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            internal static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Record that the user answered "Yes, I completed it" to a reward-for-trying offer, and decide whether the app may grant its own prize. Send it on EVERY tapped Yes, prize or not: the Yes is stored per person (the app's user id), so the offer is hidden from that person on every surface and a re-claim is refused (409 offerAlreadyCompleted), including after a reinstall or on a second device. granted is true only for the first Yes per person per offer, while the person is under the app's daily limit (a rolling 24 hours). Treat no answer as no prize. Idempotent on reportId. Never changes the transaction: no status, payout, entitlement or webhook. 404 when the transaction does not belong to this app, or userId is not the current user id of the person who claimed it. The server cannot tell an identified user from an SDK-generated anonymous id: an app that wants prizes kept to signed-in users must gate the promise client-side.
+    ///
+    /// - Remark: HTTP `POST /publisher/sdk/v1/transactions/{transactionId}/self-report`.
+    /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post`.
+    internal enum post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report {
+        internal static let id: Swift.String = "post/publisher/sdk/v1/transactions/{transactionId}/self-report"
+        internal struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/path`.
+            internal struct Path: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/path/transactionId`.
+                internal var transactionId: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - transactionId:
+                internal init(transactionId: Swift.String) {
+                    self.transactionId = transactionId
+                }
+            }
+            internal var path: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Path
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/header`.
+            internal struct Headers: Sendable, Hashable {
+                internal var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                internal init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            internal var headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Headers
+            /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody`.
+            internal enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/json`.
+                internal struct jsonPayload: Codable, Hashable, Sendable {
+                    /// The SDK's CURRENT user id at the moment the report is sent (not the id captured when the user tapped Yes). Must equal the current app user id of the user who owns the transaction, or the request is a 404.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/json/userId`.
+                    internal var userId: Swift.String
+                    /// Minted once per tapped Yes and reused on every retry of that Yes, with the same body. A retry gets the same granted. On a refused Yes the server keeps only that no prize was granted, so the retry's reason is derived from the retry's own body (daily_cap when it carries publisherRewardId, else no_prize): resend the body unchanged.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/json/reportId`.
+                    internal var reportId: Swift.String
+                    /// Present only when a prize was promised for this Yes. Absent: the Yes is still recorded (the offer is hidden and cannot be re-claimed) and granted is false with reason no_prize.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/json/publisherRewardId`.
+                    internal var publisherRewardId: Swift.String?
+                    /// The app's daily prize limit from its SDK configuration. Required when publisherRewardId is present. Clamped server-side to 1..10.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/json/dailyLimit`.
+                    internal var dailyLimit: Swift.Int?
+                    /// Creates a new `jsonPayload`.
+                    ///
+                    /// - Parameters:
+                    ///   - userId: The SDK's CURRENT user id at the moment the report is sent (not the id captured when the user tapped Yes). Must equal the current app user id of the user who owns the transaction, or the request is a 404.
+                    ///   - reportId: Minted once per tapped Yes and reused on every retry of that Yes, with the same body. A retry gets the same granted. On a refused Yes the server keeps only that no prize was granted, so the retry's reason is derived from the retry's own body (daily_cap when it carries publisherRewardId, else no_prize): resend the body unchanged.
+                    ///   - publisherRewardId: Present only when a prize was promised for this Yes. Absent: the Yes is still recorded (the offer is hidden and cannot be re-claimed) and granted is false with reason no_prize.
+                    ///   - dailyLimit: The app's daily prize limit from its SDK configuration. Required when publisherRewardId is present. Clamped server-side to 1..10.
+                    internal init(
+                        userId: Swift.String,
+                        reportId: Swift.String,
+                        publisherRewardId: Swift.String? = nil,
+                        dailyLimit: Swift.Int? = nil
+                    ) {
+                        self.userId = userId
+                        self.reportId = reportId
+                        self.publisherRewardId = publisherRewardId
+                        self.dailyLimit = dailyLimit
+                    }
+                    internal enum CodingKeys: String, CodingKey {
+                        case userId
+                        case reportId
+                        case publisherRewardId
+                        case dailyLimit
+                    }
+                }
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/requestBody/content/application\/json`.
+                case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Body.jsonPayload)
+            }
+            internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            ///   - body:
+            internal init(
+                path: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Path,
+                headers: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Headers = .init(),
+                body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Input.Body
+            ) {
+                self.path = path
+                self.headers = headers
+                self.body = body
+            }
+        }
+        internal enum Output: Sendable, Hashable {
+            internal struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json/success`.
+                        internal var success: Swift.Bool
+                        /// Whether the app may grant its prize for this Yes. True only for the first Yes per person per offer, under the daily limit. The ONLY source of prize eligibility: no answer (timeout, offline, 5xx, 404) means no prize.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json/granted`.
+                        internal var granted: Swift.Bool
+                        /// Present when granted is false.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json/reason`.
+                        internal enum reasonPayload: String, Codable, Hashable, Sendable, CaseIterable {
+                            case per_offer = "per_offer"
+                            case daily_cap = "daily_cap"
+                            case no_prize = "no_prize"
+                            case pays_on_verification = "pays_on_verification"
+                        }
+                        /// Present when granted is false.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json/reason`.
+                        internal var reason: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body.jsonPayload.reasonPayload?
+                        /// When the server recorded this person's Yes for this offer (the first one, on a retry or a second device).
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/json/reportedAt`.
+                        internal var reportedAt: Foundation.Date
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - success:
+                        ///   - granted: Whether the app may grant its prize for this Yes. True only for the first Yes per person per offer, under the daily limit. The ONLY source of prize eligibility: no answer (timeout, offline, 5xx, 404) means no prize.
+                        ///   - reason: Present when granted is false.
+                        ///   - reportedAt: When the server recorded this person's Yes for this offer (the first one, on a retry or a second device).
+                        internal init(
+                            success: Swift.Bool,
+                            granted: Swift.Bool,
+                            reason: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body.jsonPayload.reasonPayload? = nil,
+                            reportedAt: Foundation.Date
+                        ) {
+                            self.success = success
+                            self.granted = granted
+                            self.reason = reason
+                            self.reportedAt = reportedAt
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case success
+                            case granted
+                            case reason
+                            case reportedAt
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/200/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            internal var ok: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/400/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            internal var badRequest: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct Unauthorized: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/401/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized.Body
+                /// Creates a new `Unauthorized`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            internal var unauthorized: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct NotFound: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/404/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound.Body
+                /// Creates a new `NotFound`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound)
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            internal var notFound: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            internal struct InternalServerError: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/self-report/POST/responses/500/content/application\/json`.
+                    case json(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError.Body
+                /// Creates a new `InternalServerError`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/transactions/{transactionId}/self-report/post/responses/500`.
+            ///
+            /// HTTP response code: `500 internalServerError`.
+            case internalServerError(Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError)
+            /// The associated value of the enum case if `self` is `.internalServerError`.
+            ///
+            /// - Throws: An error if `self` is not `.internalServerError`.
+            /// - SeeAlso: `.internalServerError`.
+            internal var internalServerError: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_transactions_sol__lcub_transactionId_rcub__sol_self_hyphen_report.Output.InternalServerError {
                 get throws {
                     switch self {
                     case let .internalServerError(response):
@@ -7484,21 +9814,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/401/content/application\/json`.
@@ -7558,21 +9896,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/404/content/application\/json`.
@@ -7632,21 +9978,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/transactions/{transactionId}/status/GET/responses/500/content/application\/json`.
@@ -8314,21 +10668,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/400/content/application\/json`.
@@ -8388,21 +10750,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/401/content/application\/json`.
@@ -8462,21 +10832,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/revoke/POST/responses/500/content/application\/json`.
@@ -9136,21 +11514,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/400/content/application\/json`.
@@ -9210,21 +11596,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/401/content/application\/json`.
@@ -9284,21 +11678,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/GET/responses/500/content/application\/json`.
@@ -9975,21 +12377,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/401/content/application\/json`.
@@ -10049,21 +12459,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/entitlements/server/GET/responses/500/content/application\/json`.
@@ -10405,21 +12823,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/400/content/application\/json`.
@@ -10479,21 +12905,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/429/content/application\/json`.
@@ -10553,21 +12987,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/errors/POST/responses/500/content/application\/json`.
@@ -10734,6 +13176,10 @@ internal enum Operations {
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/200/content/json/value1/sduiConfig/variantName`.
                                 internal var variantName: Swift.String
+                                /// The SDUI experiment that assigned this variant. Echo it as experiment_id on offer events beside variant_id. Null or absent when no experiment decided the variant.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/200/content/json/value1/sduiConfig/experimentId`.
+                                internal var experimentId: Swift.String?
                                 /// The minimum SDK version required for this variant
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/200/content/json/value1/sduiConfig/minSdkVersion`.
@@ -10767,22 +13213,26 @@ internal enum Operations {
                                 /// - Parameters:
                                 ///   - variantId: The ID of the selected variant
                                 ///   - variantName: The name of the selected variant
+                                ///   - experimentId: The SDUI experiment that assigned this variant. Echo it as experiment_id on offer events beside variant_id. Null or absent when no experiment decided the variant.
                                 ///   - minSdkVersion: The minimum SDK version required for this variant
                                 ///   - config: The SDUI JSON layout configuration
                                 internal init(
                                     variantId: Swift.String,
                                     variantName: Swift.String,
+                                    experimentId: Swift.String? = nil,
                                     minSdkVersion: Swift.String,
                                     config: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_ui_hyphen_config.Output.Ok.Body.jsonPayload.Value1Payload.sduiConfigPayload.configPayload
                                 ) {
                                     self.variantId = variantId
                                     self.variantName = variantName
+                                    self.experimentId = experimentId
                                     self.minSdkVersion = minSdkVersion
                                     self.config = config
                                 }
                                 internal enum CodingKeys: String, CodingKey {
                                     case variantId
                                     case variantName
+                                    case experimentId
                                     case minSdkVersion
                                     case config
                                 }
@@ -11215,21 +13665,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/401/content/application\/json`.
@@ -11289,21 +13747,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/ui-config/GET/responses/500/content/application\/json`.
@@ -11385,7 +13851,7 @@ internal enum Operations {
             }
         }
     }
-    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
+    /// Get unified SDK configuration including SDUI, entitlements, experiments, and remote config. This endpoint replaces /ui-config with a cleaner structure. Entitlement mode is implicit: if entitlements.iap.productId exists, use IAP mode; otherwise use Native mode. Pass `useCase` to configure a surface other than churn-intervention; the response echoes it as ui.useCase. `demoVariant` names an SDUI variant to serve for this request. It is honoured on a TEST key (pk_test_*) for any app, and on a live key only for Encore's own demo apps; for every other app it is ignored silently (never an error). It exists for demos and previews: Encore's own demo pages, and a publisher who wants to see the other variants against their own test key. `placementId` selects a variant an admin pinned to that placement, in `ui` only; any label without a pin resolves as before. `trigger` makes this a trigger component request (GiftsButton, ClaimReminder): `useCase` is then required and is the real use case it serves, `layout` pins a look and `autoOpen=off` opts the mount out of looks that open the sheet by itself (any other present value also reads as off); a missing useCase or a malformed trigger or layout is a 400. Without `trigger`, `layout` and `autoOpen` are ignored. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, returns ui.template: null — clients must no-op, never reuse another use case's template.
     ///
     /// - Remark: HTTP `GET /publisher/sdk/v1/config`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get`.
@@ -11415,10 +13881,54 @@ internal enum Operations {
                 ///
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/useCase`.
                 internal var useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query.useCasePayload?
-                /// Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
+                /// Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. On a trigger request with autoOpen=off, an honoured look that opens the sheet by itself is served with behavior.autoOpen 'off'. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
                 ///
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/demoVariant`.
                 internal var demoVariant: Swift.String?
+                /// Present = a trigger component request (GiftsButton, ClaimReminder, customClaim): the camelCase trigger id, e.g. 'giftsButton'. Absent = a sheet request, unchanged. `useCase` is then REQUIRED and names the real use case the trigger serves (a missing useCase or a malformed trigger is a 400). The response's `ui.template` is that trigger's config (`ui.template.trigger` equals this id) or null, and `ui.useCase` echoes the requested use case. Its `root` is an SDUI element tree the SDK draws inline at `root`'s `style.frame.height` (the trigger's height), filling `${...}` from `ui.template.strings` and host values. customClaim (the custom-UI handle, which draws the app's own view) is answered with a rules-only look: layout 'behavior', no `root` or strings, minimal `ui.values`. `ui.template.behavior` names the look's step rules; `behavior.autoOpen` 'on' (an experiment arm only) opens the sheet once by itself, then draws the same look. A holdout carries `ui.experimentId` beside a null template, and `useCases` is always empty.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/trigger`.
+                internal var trigger: Swift.String?
+                /// Trigger requests only (ignored otherwise): pin the look, a camelCase layout name such as 'card' or 'pill' (malformed = 400). Serves the trigger's variant file marked pin for that layout, never enrolls in an experiment, and returns template null when there is none.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/layout`.
+                internal var layout: Swift.String?
+                /// Trigger requests only (ignored otherwise): what happened on the device. 'claimOpen' = an eligible open claim; 'completed' = an offer finished on this local day, none claimed since, its thanks not tapped. The served look's behavior then picks the step's look: claimOpen on a gifts button whose behavior.afterClaim is showReminder is answered with the reminder look (ui.template.trigger claimReminder); completed applies behavior.afterComplete (gifts serves the look, hide serves template null, thanks serves the trigger's thanks look). Any other value is served as no state, and customClaim ignores every state (the device applies its rules).
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/state`.
+                internal var state: Swift.String?
+                /// Trigger requests only (ignored otherwise): the mount's opt-out from looks that open the sheet by itself. Send 'off', and only when the mount forbids it; absent means allowed. Any other present value (another case, empty, repeated) is read as 'off', never as allowed, and is never a 400. With it, an experiment with any arm whose behavior.autoOpen is 'on', or whose file cannot be read, is skipped (the request gets the trigger's default look, never a lower experiment, and records no assignment), and any look served to the request carries behavior.autoOpen 'off'.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/autoOpen`.
+                internal var autoOpen: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): Distinct local days this placement's button counted an impression, before this request; 0 to 30. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/seenDays`.
+                internal var seenDays: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): Mounts at this placement whose impression fired, before this request; 0 to 5. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/seenCount`.
+                internal var seenCount: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): User taps on the button (auto pops do not count); 0 to 3. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/taps`.
+                internal var taps: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): Local days since the first counted impression, 0 when never seen; 0 to 60. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/firstSeenDaysAgo`.
+                internal var firstSeenDaysAgo: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): Local days since the last user tap, absent when never tapped; 0 to 60. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/lastTapDaysAgo`.
+                internal var lastTapDaysAgo: Swift.String?
+                /// GiftsButton requests without a layout pin only (ignored otherwise): ifIgnored answers this device already showed at this placement; 0 to 3, absent reads 0. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/nudges`.
+                internal var nudges: Swift.String?
+                /// The publisher's placement label for the surface being configured, e.g. 'email_code'. Optional. When an admin has pinned an SDUI variant to this (app, placement), `ui` serves that variant instead of the experiment assignment, provided it is active or valid, matches the requested use case and passes its SDK version gate and app targeting. Otherwise, and for any label with no pin, resolution is unchanged. Never a 4xx on any input. Applies to `ui` only; the `useCases` prefetch block is never pinned.
+                ///
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/query/placementId`.
+                internal var placementId: Swift.String?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
@@ -11426,19 +13936,52 @@ internal enum Operations {
                 ///   - sdkVersion: SDK version for compatibility filtering
                 ///   - language: Optional language hint (e.g. 'es'). Overrides the Accept-Language header; region subtags are stripped.
                 ///   - useCase: Which Encore surface is being configured. Omit for today's behaviour. Requesting a surface is all it takes to be served it — no setup call is required. A surface Encore has explicitly switched off for this app, or one with no variant available, resolves to template: null — it NEVER falls back to another use case's template.
-                ///   - demoVariant: Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
+                ///   - demoVariant: Demos and previews only. The SDUI variant file stem to serve for this request, e.g. 'giftUnwrap'. Honoured on a TEST key (pk_test_*) for any app. On a live key it is honoured only for Encore's own demo apps; for every other app it is ignored silently and resolution is unchanged, never an error. On a trigger request with autoOpen=off, an honoured look that opens the sheet by itself is served with behavior.autoOpen 'off'. Intended for Encore's internal demos and for a publisher previewing the other variants against their own test key. An honoured value bypasses app targeting, experiments and arm weights, and WIDENS the status filter from 'active' to 'active' or 'valid' — the filter is widened, not removed, so a draft, testing, invalid or archived variant is still refused. The use-case partition, the per-app kill switch and the SDK version gate all still apply. Note that a test key also serves the demo campaign catalog rather than live advertiser inventory, and tags the request as test traffic in analytics.
+                ///   - trigger: Present = a trigger component request (GiftsButton, ClaimReminder, customClaim): the camelCase trigger id, e.g. 'giftsButton'. Absent = a sheet request, unchanged. `useCase` is then REQUIRED and names the real use case the trigger serves (a missing useCase or a malformed trigger is a 400). The response's `ui.template` is that trigger's config (`ui.template.trigger` equals this id) or null, and `ui.useCase` echoes the requested use case. Its `root` is an SDUI element tree the SDK draws inline at `root`'s `style.frame.height` (the trigger's height), filling `${...}` from `ui.template.strings` and host values. customClaim (the custom-UI handle, which draws the app's own view) is answered with a rules-only look: layout 'behavior', no `root` or strings, minimal `ui.values`. `ui.template.behavior` names the look's step rules; `behavior.autoOpen` 'on' (an experiment arm only) opens the sheet once by itself, then draws the same look. A holdout carries `ui.experimentId` beside a null template, and `useCases` is always empty.
+                ///   - layout: Trigger requests only (ignored otherwise): pin the look, a camelCase layout name such as 'card' or 'pill' (malformed = 400). Serves the trigger's variant file marked pin for that layout, never enrolls in an experiment, and returns template null when there is none.
+                ///   - state: Trigger requests only (ignored otherwise): what happened on the device. 'claimOpen' = an eligible open claim; 'completed' = an offer finished on this local day, none claimed since, its thanks not tapped. The served look's behavior then picks the step's look: claimOpen on a gifts button whose behavior.afterClaim is showReminder is answered with the reminder look (ui.template.trigger claimReminder); completed applies behavior.afterComplete (gifts serves the look, hide serves template null, thanks serves the trigger's thanks look). Any other value is served as no state, and customClaim ignores every state (the device applies its rules).
+                ///   - autoOpen: Trigger requests only (ignored otherwise): the mount's opt-out from looks that open the sheet by itself. Send 'off', and only when the mount forbids it; absent means allowed. Any other present value (another case, empty, repeated) is read as 'off', never as allowed, and is never a 400. With it, an experiment with any arm whose behavior.autoOpen is 'on', or whose file cannot be read, is skipped (the request gets the trigger's default look, never a lower experiment, and records no assignment), and any look served to the request carries behavior.autoOpen 'off'.
+                ///   - seenDays: GiftsButton requests without a layout pin only (ignored otherwise): Distinct local days this placement's button counted an impression, before this request; 0 to 30. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - seenCount: GiftsButton requests without a layout pin only (ignored otherwise): Mounts at this placement whose impression fired, before this request; 0 to 5. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - taps: GiftsButton requests without a layout pin only (ignored otherwise): User taps on the button (auto pops do not count); 0 to 3. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - firstSeenDaysAgo: GiftsButton requests without a layout pin only (ignored otherwise): Local days since the first counted impression, 0 when never seen; 0 to 60. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - lastTapDaysAgo: GiftsButton requests without a layout pin only (ignored otherwise): Local days since the last user tap, absent when never tapped; 0 to 60. Not used by today's rule. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - nudges: GiftsButton requests without a layout pin only (ignored otherwise): ifIgnored answers this device already showed at this placement; 0 to 3, absent reads 0. Part of the exposure tally the served look's behavior.ifIgnored reads (seenDays, taps and firstSeenDaysAgo are required for it). A value that is not a whole number in range is dropped, never a 400.
+                ///   - placementId: The publisher's placement label for the surface being configured, e.g. 'email_code'. Optional. When an admin has pinned an SDUI variant to this (app, placement), `ui` serves that variant instead of the experiment assignment, provided it is active or valid, matches the requested use case and passes its SDK version gate and app targeting. Otherwise, and for any label with no pin, resolution is unchanged. Never a 4xx on any input. Applies to `ui` only; the `useCases` prefetch block is never pinned.
                 internal init(
                     userId: Swift.String,
                     sdkVersion: Swift.String,
                     language: Swift.String? = nil,
                     useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query.useCasePayload? = nil,
-                    demoVariant: Swift.String? = nil
+                    demoVariant: Swift.String? = nil,
+                    trigger: Swift.String? = nil,
+                    layout: Swift.String? = nil,
+                    state: Swift.String? = nil,
+                    autoOpen: Swift.String? = nil,
+                    seenDays: Swift.String? = nil,
+                    seenCount: Swift.String? = nil,
+                    taps: Swift.String? = nil,
+                    firstSeenDaysAgo: Swift.String? = nil,
+                    lastTapDaysAgo: Swift.String? = nil,
+                    nudges: Swift.String? = nil,
+                    placementId: Swift.String? = nil
                 ) {
                     self.userId = userId
                     self.sdkVersion = sdkVersion
                     self.language = language
                     self.useCase = useCase
                     self.demoVariant = demoVariant
+                    self.trigger = trigger
+                    self.layout = layout
+                    self.state = state
+                    self.autoOpen = autoOpen
+                    self.seenDays = seenDays
+                    self.seenCount = seenCount
+                    self.taps = taps
+                    self.firstSeenDaysAgo = firstSeenDaysAgo
+                    self.lastTapDaysAgo = lastTapDaysAgo
+                    self.nudges = nudges
+                    self.placementId = placementId
                 }
             }
             internal var query: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Input.Query
@@ -11490,7 +14033,7 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/useCase`.
                             internal var useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.useCasePayload
-                            /// Selected variant ID
+                            /// Selected variant ID. On a trigger step answer that draws nothing (template null with a step: a hide, or thanks with no thanks look), the look whose behavior decided it, so after_complete_hide can name it.
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/variantId`.
                             internal var variantId: Swift.String?
@@ -11498,6 +14041,14 @@ internal enum Operations {
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/variantName`.
                             internal var variantName: Swift.String?
+                            /// Trigger responses only: set when the look served (or template null) was chosen by a behavior for the request's `state`, or by the look's behavior.ifIgnored for a gifts button's exposure tally (a non-clicker). Values today: afterClaim, afterComplete, ifIgnored; more may be added, and an SDK treats a value it does not know as no step. With template null and an experimentId, it tells a behavior's hide apart from a holdout (an unknown step with template null is reported as reason unknown_step). Stamp it as step on the trigger events.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/step`.
+                            internal var step: Swift.String?
+                            /// Trigger responses with a `step` only: the experiment whose look's behavior chose the step (for a reminder in a gifts button spot, the gifts button's), beside experimentId (the drawn look's own; on an afterComplete step, the deciding look's, as a thanks look is in no arm). An opaque id (a UUID today). Stamp it as step_experiment_id on the trigger events.
+                            ///
+                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/stepExperimentId`.
+                            internal var stepExperimentId: Swift.String?
                             /// Minimum SDK version for this variant
                             ///
                             /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/minSdkVersion`.
@@ -11594,6 +14145,26 @@ internal enum Operations {
                                     ///
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardSubheadline`.
                                     internal var rewardSubheadline: Swift.String?
+                                    /// Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardCta`.
+                                    internal var rewardCta: Swift.String?
+                                    /// Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardDecline`.
+                                    internal var rewardDecline: Swift.String?
+                                    /// Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardBadge`.
+                                    internal var rewardBadge: Swift.String?
+                                    /// Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardMoreGifts`.
+                                    internal var rewardMoreGifts: Swift.String?
+                                    /// Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/text/rewardOtherGifts`.
+                                    internal var rewardOtherGifts: Swift.String?
                                     /// Creates a new `textPayload`.
                                     ///
                                     /// - Parameters:
@@ -11612,6 +14183,11 @@ internal enum Operations {
                                     ///   - customSubheadline: Custom subheadline text for SDUI variant (falls back to subtitle)
                                     ///   - rewardHeadline: Headline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward' — the template references ${rewardHeadline} unconditionally and the substitution engine leaves an unresolved token visible on screen. Resolution: app_use_cases.headline, else the shipped default.
                                     ///   - rewardSubheadline: Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default.
+                                    ///   - rewardCta: Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                    ///   - rewardDecline: Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                    ///   - rewardBadge: Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                    ///   - rewardMoreGifts: Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                    ///   - rewardOtherGifts: Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
                                     internal init(
                                         appName: Swift.String? = nil,
                                         title: Swift.String? = nil,
@@ -11627,7 +14203,12 @@ internal enum Operations {
                                         customHeadline: Swift.String? = nil,
                                         customSubheadline: Swift.String? = nil,
                                         rewardHeadline: Swift.String? = nil,
-                                        rewardSubheadline: Swift.String? = nil
+                                        rewardSubheadline: Swift.String? = nil,
+                                        rewardCta: Swift.String? = nil,
+                                        rewardDecline: Swift.String? = nil,
+                                        rewardBadge: Swift.String? = nil,
+                                        rewardMoreGifts: Swift.String? = nil,
+                                        rewardOtherGifts: Swift.String? = nil
                                     ) {
                                         self.appName = appName
                                         self.title = title
@@ -11644,6 +14225,11 @@ internal enum Operations {
                                         self.customSubheadline = customSubheadline
                                         self.rewardHeadline = rewardHeadline
                                         self.rewardSubheadline = rewardSubheadline
+                                        self.rewardCta = rewardCta
+                                        self.rewardDecline = rewardDecline
+                                        self.rewardBadge = rewardBadge
+                                        self.rewardMoreGifts = rewardMoreGifts
+                                        self.rewardOtherGifts = rewardOtherGifts
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case appName
@@ -11661,6 +14247,11 @@ internal enum Operations {
                                         case customSubheadline
                                         case rewardHeadline
                                         case rewardSubheadline
+                                        case rewardCta
+                                        case rewardDecline
+                                        case rewardBadge
+                                        case rewardMoreGifts
+                                        case rewardOtherGifts
                                     }
                                 }
                                 /// Text values for template substitution
@@ -11739,25 +14330,130 @@ internal enum Operations {
                                 ///
                                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/media`.
                                 internal var media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.mediaPayload
+                                /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/strings`.
+                                internal struct stringsPayload: Codable, Hashable, Sendable {
+                                    /// A container of undocumented properties.
+                                    internal var additionalProperties: [String: Swift.String]
+                                    /// Creates a new `stringsPayload`.
+                                    ///
+                                    /// - Parameters:
+                                    ///   - additionalProperties: A container of undocumented properties.
+                                    internal init(additionalProperties: [String: Swift.String] = .init()) {
+                                        self.additionalProperties = additionalProperties
+                                    }
+                                    internal init(from decoder: any Decoder) throws {
+                                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                    }
+                                    internal func encode(to encoder: any Encoder) throws {
+                                        try encoder.encodeAdditionalProperties(additionalProperties)
+                                    }
+                                }
+                                /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/strings`.
+                                internal var strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.stringsPayload?
+                                /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals`.
+                                internal struct pluralsPayload: Codable, Hashable, Sendable {
+                                    /// CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties`.
+                                    internal struct additionalPropertiesPayload: Codable, Hashable, Sendable {
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/zero`.
+                                        internal var zero: Swift.String?
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/one`.
+                                        internal var one: Swift.String?
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/two`.
+                                        internal var two: Swift.String?
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/few`.
+                                        internal var few: Swift.String?
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/many`.
+                                        internal var many: Swift.String?
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals/additionalProperties/other`.
+                                        internal var other: Swift.String
+                                        /// Creates a new `additionalPropertiesPayload`.
+                                        ///
+                                        /// - Parameters:
+                                        ///   - zero:
+                                        ///   - one:
+                                        ///   - two:
+                                        ///   - few:
+                                        ///   - many:
+                                        ///   - other:
+                                        internal init(
+                                            zero: Swift.String? = nil,
+                                            one: Swift.String? = nil,
+                                            two: Swift.String? = nil,
+                                            few: Swift.String? = nil,
+                                            many: Swift.String? = nil,
+                                            other: Swift.String
+                                        ) {
+                                            self.zero = zero
+                                            self.one = one
+                                            self.two = two
+                                            self.few = few
+                                            self.many = many
+                                            self.other = other
+                                        }
+                                        internal enum CodingKeys: String, CodingKey {
+                                            case zero
+                                            case one
+                                            case two
+                                            case few
+                                            case many
+                                            case other
+                                        }
+                                    }
+                                    /// A container of undocumented properties.
+                                    internal var additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload]
+                                    /// Creates a new `pluralsPayload`.
+                                    ///
+                                    /// - Parameters:
+                                    ///   - additionalProperties: A container of undocumented properties.
+                                    internal init(additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload] = .init()) {
+                                        self.additionalProperties = additionalProperties
+                                    }
+                                    internal init(from decoder: any Decoder) throws {
+                                        additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                    }
+                                    internal func encode(to encoder: any Encoder) throws {
+                                        try encoder.encodeAdditionalProperties(additionalProperties)
+                                    }
+                                }
+                                /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                ///
+                                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ui/values/plurals`.
+                                internal var plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.pluralsPayload?
                                 /// Creates a new `valuesPayload`.
                                 ///
                                 /// - Parameters:
                                 ///   - text: Text values for template substitution
                                 ///   - appearance: Appearance values
                                 ///   - media: Media values (imagery URLs)
+                                ///   - strings: Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                ///   - plurals: Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
                                 internal init(
                                     text: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.textPayload,
                                     appearance: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.appearancePayload,
-                                    media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.mediaPayload
+                                    media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.mediaPayload,
+                                    strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.stringsPayload? = nil,
+                                    plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload.pluralsPayload? = nil
                                 ) {
                                     self.text = text
                                     self.appearance = appearance
                                     self.media = media
+                                    self.strings = strings
+                                    self.plurals = plurals
                                 }
                                 internal enum CodingKeys: String, CodingKey {
                                     case text
                                     case appearance
                                     case media
+                                    case strings
+                                    case plurals
                                 }
                             }
                             /// Values to substitute into template
@@ -11768,8 +14464,10 @@ internal enum Operations {
                             ///
                             /// - Parameters:
                             ///   - useCase: The Encore surface this UI config is for
-                            ///   - variantId: Selected variant ID
+                            ///   - variantId: Selected variant ID. On a trigger step answer that draws nothing (template null with a step: a hide, or thanks with no thanks look), the look whose behavior decided it, so after_complete_hide can name it.
                             ///   - variantName: Selected variant name
+                            ///   - step: Trigger responses only: set when the look served (or template null) was chosen by a behavior for the request's `state`, or by the look's behavior.ifIgnored for a gifts button's exposure tally (a non-clicker). Values today: afterClaim, afterComplete, ifIgnored; more may be added, and an SDK treats a value it does not know as no step. With template null and an experimentId, it tells a behavior's hide apart from a holdout (an unknown step with template null is reported as reason unknown_step). Stamp it as step on the trigger events.
+                            ///   - stepExperimentId: Trigger responses with a `step` only: the experiment whose look's behavior chose the step (for a reminder in a gifts button spot, the gifts button's), beside experimentId (the drawn look's own; on an afterComplete step, the deciding look's, as a thanks look is in no arm). An opaque id (a UUID today). Stamp it as step_experiment_id on the trigger events.
                             ///   - minSdkVersion: Minimum SDK version for this variant
                             ///   - template: SDUI template with placeholders
                             ///   - values: Values to substitute into template
@@ -11777,6 +14475,8 @@ internal enum Operations {
                                 useCase: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.useCasePayload,
                                 variantId: Swift.String? = nil,
                                 variantName: Swift.String? = nil,
+                                step: Swift.String? = nil,
+                                stepExperimentId: Swift.String? = nil,
                                 minSdkVersion: Swift.String? = nil,
                                 template: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.templatePayload? = nil,
                                 values: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload.valuesPayload
@@ -11784,6 +14484,8 @@ internal enum Operations {
                                 self.useCase = useCase
                                 self.variantId = variantId
                                 self.variantName = variantName
+                                self.step = step
+                                self.stepExperimentId = stepExperimentId
                                 self.minSdkVersion = minSdkVersion
                                 self.template = template
                                 self.values = values
@@ -11792,6 +14494,8 @@ internal enum Operations {
                                 case useCase
                                 case variantId
                                 case variantName
+                                case step
+                                case stepExperimentId
                                 case minSdkVersion
                                 case template
                                 case values
@@ -11907,6 +14611,26 @@ internal enum Operations {
                                         ///
                                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardSubheadline`.
                                         internal var rewardSubheadline: Swift.String?
+                                        /// Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardCta`.
+                                        internal var rewardCta: Swift.String?
+                                        /// Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardDecline`.
+                                        internal var rewardDecline: Swift.String?
+                                        /// Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardBadge`.
+                                        internal var rewardBadge: Swift.String?
+                                        /// Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardMoreGifts`.
+                                        internal var rewardMoreGifts: Swift.String?
+                                        /// Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/text/rewardOtherGifts`.
+                                        internal var rewardOtherGifts: Swift.String?
                                         /// Creates a new `textPayload`.
                                         ///
                                         /// - Parameters:
@@ -11925,6 +14649,11 @@ internal enum Operations {
                                         ///   - customSubheadline: Custom subheadline text for SDUI variant (falls back to subtitle)
                                         ///   - rewardHeadline: Headline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward' — the template references ${rewardHeadline} unconditionally and the substitution engine leaves an unresolved token visible on screen. Resolution: app_use_cases.headline, else the shipped default.
                                         ///   - rewardSubheadline: Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default.
+                                        ///   - rewardCta: Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                        ///   - rewardDecline: Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardBadge: Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardMoreGifts: Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardOtherGifts: Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
                                         internal init(
                                             appName: Swift.String? = nil,
                                             title: Swift.String? = nil,
@@ -11940,7 +14669,12 @@ internal enum Operations {
                                             customHeadline: Swift.String? = nil,
                                             customSubheadline: Swift.String? = nil,
                                             rewardHeadline: Swift.String? = nil,
-                                            rewardSubheadline: Swift.String? = nil
+                                            rewardSubheadline: Swift.String? = nil,
+                                            rewardCta: Swift.String? = nil,
+                                            rewardDecline: Swift.String? = nil,
+                                            rewardBadge: Swift.String? = nil,
+                                            rewardMoreGifts: Swift.String? = nil,
+                                            rewardOtherGifts: Swift.String? = nil
                                         ) {
                                             self.appName = appName
                                             self.title = title
@@ -11957,6 +14691,11 @@ internal enum Operations {
                                             self.customSubheadline = customSubheadline
                                             self.rewardHeadline = rewardHeadline
                                             self.rewardSubheadline = rewardSubheadline
+                                            self.rewardCta = rewardCta
+                                            self.rewardDecline = rewardDecline
+                                            self.rewardBadge = rewardBadge
+                                            self.rewardMoreGifts = rewardMoreGifts
+                                            self.rewardOtherGifts = rewardOtherGifts
                                         }
                                         internal enum CodingKeys: String, CodingKey {
                                             case appName
@@ -11974,6 +14713,11 @@ internal enum Operations {
                                             case customSubheadline
                                             case rewardHeadline
                                             case rewardSubheadline
+                                            case rewardCta
+                                            case rewardDecline
+                                            case rewardBadge
+                                            case rewardMoreGifts
+                                            case rewardOtherGifts
                                         }
                                     }
                                     /// Text values for template substitution
@@ -12052,25 +14796,130 @@ internal enum Operations {
                                     ///
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/media`.
                                     internal var media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.mediaPayload
+                                    /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/strings`.
+                                    internal struct stringsPayload: Codable, Hashable, Sendable {
+                                        /// A container of undocumented properties.
+                                        internal var additionalProperties: [String: Swift.String]
+                                        /// Creates a new `stringsPayload`.
+                                        ///
+                                        /// - Parameters:
+                                        ///   - additionalProperties: A container of undocumented properties.
+                                        internal init(additionalProperties: [String: Swift.String] = .init()) {
+                                            self.additionalProperties = additionalProperties
+                                        }
+                                        internal init(from decoder: any Decoder) throws {
+                                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                        }
+                                        internal func encode(to encoder: any Encoder) throws {
+                                            try encoder.encodeAdditionalProperties(additionalProperties)
+                                        }
+                                    }
+                                    /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/strings`.
+                                    internal var strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.stringsPayload?
+                                    /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals`.
+                                    internal struct pluralsPayload: Codable, Hashable, Sendable {
+                                        /// CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties`.
+                                        internal struct additionalPropertiesPayload: Codable, Hashable, Sendable {
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/zero`.
+                                            internal var zero: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/one`.
+                                            internal var one: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/two`.
+                                            internal var two: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/few`.
+                                            internal var few: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/many`.
+                                            internal var many: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals/additionalProperties/other`.
+                                            internal var other: Swift.String
+                                            /// Creates a new `additionalPropertiesPayload`.
+                                            ///
+                                            /// - Parameters:
+                                            ///   - zero:
+                                            ///   - one:
+                                            ///   - two:
+                                            ///   - few:
+                                            ///   - many:
+                                            ///   - other:
+                                            internal init(
+                                                zero: Swift.String? = nil,
+                                                one: Swift.String? = nil,
+                                                two: Swift.String? = nil,
+                                                few: Swift.String? = nil,
+                                                many: Swift.String? = nil,
+                                                other: Swift.String
+                                            ) {
+                                                self.zero = zero
+                                                self.one = one
+                                                self.two = two
+                                                self.few = few
+                                                self.many = many
+                                                self.other = other
+                                            }
+                                            internal enum CodingKeys: String, CodingKey {
+                                                case zero
+                                                case one
+                                                case two
+                                                case few
+                                                case many
+                                                case other
+                                            }
+                                        }
+                                        /// A container of undocumented properties.
+                                        internal var additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload]
+                                        /// Creates a new `pluralsPayload`.
+                                        ///
+                                        /// - Parameters:
+                                        ///   - additionalProperties: A container of undocumented properties.
+                                        internal init(additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload] = .init()) {
+                                            self.additionalProperties = additionalProperties
+                                        }
+                                        internal init(from decoder: any Decoder) throws {
+                                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                        }
+                                        internal func encode(to encoder: any Encoder) throws {
+                                            try encoder.encodeAdditionalProperties(additionalProperties)
+                                        }
+                                    }
+                                    /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/churn-intervention/values/plurals`.
+                                    internal var plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.pluralsPayload?
                                     /// Creates a new `valuesPayload`.
                                     ///
                                     /// - Parameters:
                                     ///   - text: Text values for template substitution
                                     ///   - appearance: Appearance values
                                     ///   - media: Media values (imagery URLs)
+                                    ///   - strings: Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///   - plurals: Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
                                     internal init(
                                         text: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.textPayload,
                                         appearance: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.appearancePayload,
-                                        media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.mediaPayload
+                                        media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.mediaPayload,
+                                        strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.stringsPayload? = nil,
+                                        plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.churn_hyphen_interventionPayload.valuesPayload.pluralsPayload? = nil
                                     ) {
                                         self.text = text
                                         self.appearance = appearance
                                         self.media = media
+                                        self.strings = strings
+                                        self.plurals = plurals
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case text
                                         case appearance
                                         case media
+                                        case strings
+                                        case plurals
                                     }
                                 }
                                 /// Values to substitute into this use case's template. Always present, even when template is null — the copy is resolved from app_use_cases regardless.
@@ -12206,6 +15055,26 @@ internal enum Operations {
                                         ///
                                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardSubheadline`.
                                         internal var rewardSubheadline: Swift.String?
+                                        /// Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardCta`.
+                                        internal var rewardCta: Swift.String?
+                                        /// Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardDecline`.
+                                        internal var rewardDecline: Swift.String?
+                                        /// Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardBadge`.
+                                        internal var rewardBadge: Swift.String?
+                                        /// Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardMoreGifts`.
+                                        internal var rewardMoreGifts: Swift.String?
+                                        /// Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/text/rewardOtherGifts`.
+                                        internal var rewardOtherGifts: Swift.String?
                                         /// Creates a new `textPayload`.
                                         ///
                                         /// - Parameters:
@@ -12224,6 +15093,11 @@ internal enum Operations {
                                         ///   - customSubheadline: Custom subheadline text for SDUI variant (falls back to subtitle)
                                         ///   - rewardHeadline: Headline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward' — the template references ${rewardHeadline} unconditionally and the substitution engine leaves an unresolved token visible on screen. Resolution: app_use_cases.headline, else the shipped default.
                                         ///   - rewardSubheadline: Subheadline for the reward template. NON-NULL whenever ui.useCase is 'post-action-reward', for the same reason as rewardHeadline — the template references ${rewardSubheadline} unconditionally. Resolution: app_use_cases.subheadline, else the shipped default.
+                                        ///   - rewardCta: Primary button label for the reward template. Resolution: the variant's own defaultCopy.cta. Null when the variant declares none, in which case its template carries a literal instead. An SDK that predates this field receives the wording inlined in the template, not a token.
+                                        ///   - rewardDecline: Decline button label for the reward template. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardBadge: Badge on the highlighted offer card, e.g. 'Most claimed'. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardMoreGifts: Label on the card that opens the rest of the offer list, e.g. 'Show more gifts'. Same resolution and same null meaning as rewardCta.
+                                        ///   - rewardOtherGifts: Header above the rest of the offer list, e.g. 'Other gifts'. Same resolution and same null meaning as rewardCta.
                                         internal init(
                                             appName: Swift.String? = nil,
                                             title: Swift.String? = nil,
@@ -12239,7 +15113,12 @@ internal enum Operations {
                                             customHeadline: Swift.String? = nil,
                                             customSubheadline: Swift.String? = nil,
                                             rewardHeadline: Swift.String? = nil,
-                                            rewardSubheadline: Swift.String? = nil
+                                            rewardSubheadline: Swift.String? = nil,
+                                            rewardCta: Swift.String? = nil,
+                                            rewardDecline: Swift.String? = nil,
+                                            rewardBadge: Swift.String? = nil,
+                                            rewardMoreGifts: Swift.String? = nil,
+                                            rewardOtherGifts: Swift.String? = nil
                                         ) {
                                             self.appName = appName
                                             self.title = title
@@ -12256,6 +15135,11 @@ internal enum Operations {
                                             self.customSubheadline = customSubheadline
                                             self.rewardHeadline = rewardHeadline
                                             self.rewardSubheadline = rewardSubheadline
+                                            self.rewardCta = rewardCta
+                                            self.rewardDecline = rewardDecline
+                                            self.rewardBadge = rewardBadge
+                                            self.rewardMoreGifts = rewardMoreGifts
+                                            self.rewardOtherGifts = rewardOtherGifts
                                         }
                                         internal enum CodingKeys: String, CodingKey {
                                             case appName
@@ -12273,6 +15157,11 @@ internal enum Operations {
                                             case customSubheadline
                                             case rewardHeadline
                                             case rewardSubheadline
+                                            case rewardCta
+                                            case rewardDecline
+                                            case rewardBadge
+                                            case rewardMoreGifts
+                                            case rewardOtherGifts
                                         }
                                     }
                                     /// Text values for template substitution
@@ -12351,25 +15240,130 @@ internal enum Operations {
                                     ///
                                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/media`.
                                     internal var media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.mediaPayload
+                                    /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/strings`.
+                                    internal struct stringsPayload: Codable, Hashable, Sendable {
+                                        /// A container of undocumented properties.
+                                        internal var additionalProperties: [String: Swift.String]
+                                        /// Creates a new `stringsPayload`.
+                                        ///
+                                        /// - Parameters:
+                                        ///   - additionalProperties: A container of undocumented properties.
+                                        internal init(additionalProperties: [String: Swift.String] = .init()) {
+                                            self.additionalProperties = additionalProperties
+                                        }
+                                        internal init(from decoder: any Decoder) throws {
+                                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                        }
+                                        internal func encode(to encoder: any Encoder) throws {
+                                            try encoder.encodeAdditionalProperties(additionalProperties)
+                                        }
+                                    }
+                                    /// Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/strings`.
+                                    internal var strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.stringsPayload?
+                                    /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals`.
+                                    internal struct pluralsPayload: Codable, Hashable, Sendable {
+                                        /// CLDR plural forms. Pick the form with the locale's plural rules for the count; fall back to `other` when that form is absent. `${count}` is the count placeholder.
+                                        ///
+                                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties`.
+                                        internal struct additionalPropertiesPayload: Codable, Hashable, Sendable {
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/zero`.
+                                            internal var zero: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/one`.
+                                            internal var one: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/two`.
+                                            internal var two: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/few`.
+                                            internal var few: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/many`.
+                                            internal var many: Swift.String?
+                                            /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals/additionalProperties/other`.
+                                            internal var other: Swift.String
+                                            /// Creates a new `additionalPropertiesPayload`.
+                                            ///
+                                            /// - Parameters:
+                                            ///   - zero:
+                                            ///   - one:
+                                            ///   - two:
+                                            ///   - few:
+                                            ///   - many:
+                                            ///   - other:
+                                            internal init(
+                                                zero: Swift.String? = nil,
+                                                one: Swift.String? = nil,
+                                                two: Swift.String? = nil,
+                                                few: Swift.String? = nil,
+                                                many: Swift.String? = nil,
+                                                other: Swift.String
+                                            ) {
+                                                self.zero = zero
+                                                self.one = one
+                                                self.two = two
+                                                self.few = few
+                                                self.many = many
+                                                self.other = other
+                                            }
+                                            internal enum CodingKeys: String, CodingKey {
+                                                case zero
+                                                case one
+                                                case two
+                                                case few
+                                                case many
+                                                case other
+                                            }
+                                        }
+                                        /// A container of undocumented properties.
+                                        internal var additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload]
+                                        /// Creates a new `pluralsPayload`.
+                                        ///
+                                        /// - Parameters:
+                                        ///   - additionalProperties: A container of undocumented properties.
+                                        internal init(additionalProperties: [String: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.pluralsPayload.additionalPropertiesPayload] = .init()) {
+                                            self.additionalProperties = additionalProperties
+                                        }
+                                        internal init(from decoder: any Decoder) throws {
+                                            additionalProperties = try decoder.decodeAdditionalProperties(knownKeys: [])
+                                        }
+                                        internal func encode(to encoder: any Encoder) throws {
+                                            try encoder.encodeAdditionalProperties(additionalProperties)
+                                        }
+                                    }
+                                    /// Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
+                                    ///
+                                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/useCases/post-action-reward/values/plurals`.
+                                    internal var plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.pluralsPayload?
                                     /// Creates a new `valuesPayload`.
                                     ///
                                     /// - Parameters:
                                     ///   - text: Text values for template substitution
                                     ///   - appearance: Appearance values
                                     ///   - media: Media values (imagery URLs)
+                                    ///   - strings: Words the SDK says itself, translated into the response `locale`, by string id (e.g. 'card.claim'). Only ids that locale has; for any other id, and whenever the key is absent, use the SDK's own English. Never served for 'en'. Placeholders use ${name}. Populated in `ui.values` only, not in `useCases`.
+                                    ///   - plurals: Count-dependent SDK strings (e.g. 'unit.month'), translated into the response `locale`, by string id. Same id namespace as `strings`; an id appears in only one of the two. Same fallback rules as `strings`.
                                     internal init(
                                         text: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.textPayload,
                                         appearance: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.appearancePayload,
-                                        media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.mediaPayload
+                                        media: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.mediaPayload,
+                                        strings: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.stringsPayload? = nil,
+                                        plurals: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload.post_hyphen_action_hyphen_rewardPayload.valuesPayload.pluralsPayload? = nil
                                     ) {
                                         self.text = text
                                         self.appearance = appearance
                                         self.media = media
+                                        self.strings = strings
+                                        self.plurals = plurals
                                     }
                                     internal enum CodingKeys: String, CodingKey {
                                         case text
                                         case appearance
                                         case media
+                                        case strings
+                                        case plurals
                                     }
                                 }
                                 /// Values to substitute into this use case's template. Always present, even when template is null — the copy is resolved from app_use_cases regardless.
@@ -12611,6 +15605,10 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/locale`.
                         internal var locale: Swift.String?
+                        /// Placement labels for this app that carry a placement rule or pinned variant. Present whenever the app's placement rules can be read; empty when none. Clients scope their offers cache by placement only for labels in this list; when the field is absent (older server) clients keep their pre-2.4 behaviour.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/json/ruledPlacements`.
+                        internal var ruledPlacements: [Swift.String]?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
@@ -12620,13 +15618,15 @@ internal enum Operations {
                         ///   - entitlements: Entitlement configuration (IAP or Native mode)
                         ///   - experiments: Experiment configurations
                         ///   - locale: Resolved locale served in this response (language-only, e.g. 'es'). Absent on pre-localization responses.
+                        ///   - ruledPlacements: Placement labels for this app that carry a placement rule or pinned variant. Present whenever the app's placement rules can be read; empty when none. Clients scope their offers cache by placement only for labels in this list; when the field is absent (older server) clients keep their pre-2.4 behaviour.
                         internal init(
                             success: Swift.Bool,
                             ui: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.uiPayload,
                             useCases: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.useCasesPayload,
                             entitlements: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.entitlementsPayload,
                             experiments: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.Ok.Body.jsonPayload.experimentsPayload,
-                            locale: Swift.String? = nil
+                            locale: Swift.String? = nil,
+                            ruledPlacements: [Swift.String]? = nil
                         ) {
                             self.success = success
                             self.ui = ui
@@ -12634,6 +15634,7 @@ internal enum Operations {
                             self.entitlements = entitlements
                             self.experiments = experiments
                             self.locale = locale
+                            self.ruledPlacements = ruledPlacements
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case success
@@ -12642,6 +15643,7 @@ internal enum Operations {
                             case entitlements
                             case experiments
                             case locale
+                            case ruledPlacements
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/200/content/application\/json`.
@@ -12692,6 +15694,88 @@ internal enum Operations {
                     }
                 }
             }
+            internal struct BadRequest: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content`.
+                internal enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content/json`.
+                    internal struct jsonPayload: Codable, Hashable, Sendable {
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content/json/error`.
+                        internal var error: Swift.String
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content/json/details`.
+                        internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content/json/code`.
+                        internal var code: Swift.String?
+                        /// Creates a new `jsonPayload`.
+                        ///
+                        /// - Parameters:
+                        ///   - error:
+                        ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        internal init(
+                            error: Swift.String,
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
+                        ) {
+                            self.error = error
+                            self.details = details
+                            self.code = code
+                        }
+                        internal enum CodingKeys: String, CodingKey {
+                            case error
+                            case details
+                            case code
+                        }
+                    }
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/400/content/application\/json`.
+                    case json(Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest.Body.jsonPayload)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    internal var json: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest.Body.jsonPayload {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                internal var body: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest.Body
+                /// Creates a new `BadRequest`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                internal init(body: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest.Body) {
+                    self.body = body
+                }
+            }
+            /// Default Response
+            ///
+            /// - Remark: Generated from `#/paths//publisher/sdk/v1/config/get/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            internal var badRequest: Operations.get_sol_publisher_sol_sdk_sol_v1_sol_config.Output.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
             internal struct Unauthorized: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/401/content`.
                 internal enum Body: Sendable, Hashable {
@@ -12701,21 +15785,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/401/content/application\/json`.
@@ -12775,21 +15867,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/config/GET/responses/500/content/application\/json`.
@@ -13055,21 +16155,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/401/content/application\/json`.
@@ -13129,21 +16237,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/POST/responses/500/content/application\/json`.
@@ -13225,7 +16341,7 @@ internal enum Operations {
             }
         }
     }
-    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login.
+    /// Update user identity (anonymous→identified). Updates the user's app_user_id. Called when developer calls SDK.identify() after login. When newUserId already exists (the person signed in before, e.g. on another device), the anonymous user's completed and self-reported offers are copied onto that account, so they stay hidden and cannot be re-claimed. The copy is taken once, at this call: send any queued self-reports BEFORE it. A report for the anonymous user's claim that arrives afterwards is refused if it carries newUserId (404), and recorded on the anonymous user only, not this account, if it carries currentUserId.
     ///
     /// - Remark: HTTP `PATCH /publisher/sdk/v1/users/identify`.
     /// - Remark: Generated from `#/paths//publisher/sdk/v1/users/identify/patch`.
@@ -13409,21 +16525,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/401/content/application\/json`.
@@ -13483,21 +16607,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/identify/PATCH/responses/500/content/application\/json`.
@@ -13583,7 +16715,9 @@ internal enum Operations {
     ///
     /// Precedence: an attribute sent on an /offers/search or /offers/feed request always WINS over the stored one. The stored set only fills an attribute the request omits.
     ///
-    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age`, `countryCode` and `language` are STORED — the attributes that decide where an offer may legally appear and which creative locale renders; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
+    /// LANGUAGE is accepted and ignored: it is never stored. The hosted page and the SDKs send it on each request, else Accept-Language decides.
+    ///
+    /// AGE. Send `age` as a whole-number integer. If you hold only a RANGE, send its LOWEST end — "13-17" is sent as 13, never 15 and never 17. Sending the middle of a range silently defeats the under-age check: flooring can never mask a minor, a midpoint can. An age below 18 restricts that user to age-appropriate inventory ranked by the app-level bandit, with NO per-user personalisation — offers are still served. For such a user only `age` and `countryCode` are STORED — the attributes that decide where an offer may legally appear; everything else you sent is discarded, `custom` included, and the response reports `minor`. The instant you sent the set is recorded, so a stored age is aged forward rather than frozen. `dateOfBirth` is refused: `age` carries the same targeting value with far less identifying power.
     ///
     /// GATED KEYS. email, firstName, lastName, mobile, phoneNumber, postcode, postalCode, latitude, longitude and gender are accepted ONLY from an app whose audience is declared adults_only (store-rated 18+). Any other status, including the default, is refused with 400. `age` is NOT gated — it is accepted from any app, because it is what restricts what a user is shown rather than something that identifies them. Unrecognised keys are refused rather than ignored. Authentication: publishable key (X-API-Key: pk_live_* / pk_test_*).
     ///
@@ -13620,6 +16754,8 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/countryCode`.
                         internal var countryCode: Swift.String?
+                        /// Accepted for compatibility and ignored: the language is never stored. Send it on each request (attributes.language, or Accept-Language) instead.
+                        ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/language`.
                         internal var language: Swift.String?
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/requestBody/json/attributes/city`.
@@ -13692,7 +16828,7 @@ internal enum Operations {
                         ///
                         /// - Parameters:
                         ///   - countryCode: ISO 3166-1 alpha-2 country code (e.g., "US", "GB", "CA").
-                        ///   - language:
+                        ///   - language: Accepted for compatibility and ignored: the language is never stored. Send it on each request (attributes.language, or Accept-Language) instead.
                         ///   - city:
                         ///   - state:
                         ///   - region:
@@ -13843,7 +16979,7 @@ internal enum Operations {
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/storedAt`.
                         internal var storedAt: Swift.String
-                        /// True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
+                        /// True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age` and `countryCode` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
                         ///
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/200/content/json/minor`.
                         internal var minor: Swift.Bool
@@ -13853,7 +16989,7 @@ internal enum Operations {
                         ///   - success:
                         ///   - userId: Canonical user UUID
                         ///   - storedAt: ISO 8601 instant the set was recorded; what a stored age is aged forward from
-                        ///   - minor: True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age`, `countryCode` and `language` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
+                        ///   - minor: True when the supplied age was under 18. Offers are STILL served to this user — from age-appropriate inventory only, ranked by the app-level bandit, with no per-user personalisation. Only `age` and `countryCode` are kept for this user. Everything else you sent is DISCARDED, including `custom`, `city`, `state`, `region` and the subscription and billing fields — a profile that may not be targeted on has no purpose. Re-send the set once they are 18 and it is stored in full.
                         internal init(
                             success: Swift.Bool,
                             userId: Swift.String,
@@ -13929,21 +17065,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/400/content/application\/json`.
@@ -14003,21 +17147,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/401/content/application\/json`.
@@ -14077,21 +17229,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/users/attributes/POST/responses/500/content/application\/json`.
@@ -14332,21 +17492,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/401/content/application\/json`.
@@ -14406,21 +17574,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/iap-links/POST/responses/500/content/application\/json`.
@@ -14656,21 +17832,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/400/content/application\/json`.
@@ -14730,21 +17914,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/401/content/application\/json`.
@@ -14804,21 +17996,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/404/content/application\/json`.
@@ -14878,21 +18078,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/promo-signature/GET/responses/500/content/application\/json`.
@@ -15124,21 +18332,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/400/content/application\/json`.
@@ -15198,21 +18414,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/403/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/403/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/403/content/application\/json`.
@@ -15272,21 +18496,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/test/conversions/complete/POST/responses/404/content/application\/json`.
@@ -15397,6 +18629,10 @@ internal enum Operations {
                     internal var campaignId: Swift.String
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/requestBody/json/email`.
                     internal var email: Swift.String
+                    /// Optional BCP 47 language tag (e.g. "es", "pt-BR"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE. The lead's emails go out in the language served.
+                    ///
+                    /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/requestBody/json/language`.
+                    internal var language: Swift.String?
                     /// Trial length in days as reported by StoreKit; drives reminder scheduling.
                     ///
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/requestBody/json/trialDurationDays`.
@@ -15422,6 +18658,7 @@ internal enum Operations {
                     ///   - userId:
                     ///   - campaignId:
                     ///   - email:
+                    ///   - language: Optional BCP 47 language tag (e.g. "es", "pt-BR"), from the host's language override. Wins over Accept-Language; only the language subtag is used (nb is served as no; iw, in, ji, jw as he, id, yi, jv), and only when the app has it enabled, else Accept-Language, then the app default. A tag the SDKs would refuse (malformed, underscores, or an extended language subtag such as zh-yue-HK) is 400 with details.code INVALID_LANGUAGE. The lead's emails go out in the language served.
                     ///   - trialDurationDays: Trial length in days as reported by StoreKit; drives reminder scheduling.
                     ///   - transactionId: Client-issued UUID v4 used as the conversion attribution id; substituted into the sponsor URL at email-send time.
                     ///   - useCase: Which Encore surface the user claimed from. Persisted on the transaction this route creates, so the server-side completion — built from that row alone, with no client context — can be split by use case, along with the payout booked on it. Absent means 'churn-intervention'.
@@ -15429,6 +18666,7 @@ internal enum Operations {
                         userId: Swift.String,
                         campaignId: Swift.String,
                         email: Swift.String,
+                        language: Swift.String? = nil,
                         trialDurationDays: Swift.Int? = nil,
                         transactionId: Swift.String,
                         useCase: Operations.post_sol_publisher_sol_sdk_sol_v1_sol_leads.Input.Body.jsonPayload.useCasePayload? = nil
@@ -15436,6 +18674,7 @@ internal enum Operations {
                         self.userId = userId
                         self.campaignId = campaignId
                         self.email = email
+                        self.language = language
                         self.trialDurationDays = trialDurationDays
                         self.transactionId = transactionId
                         self.useCase = useCase
@@ -15444,6 +18683,7 @@ internal enum Operations {
                         case userId
                         case campaignId
                         case email
+                        case language
                         case trialDurationDays
                         case transactionId
                         case useCase
@@ -15552,21 +18792,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/400/content/application\/json`.
@@ -15626,21 +18874,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/401/content/application\/json`.
@@ -15700,21 +18956,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/leads/POST/responses/500/content/application\/json`.
@@ -15949,21 +19213,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/400/content/application\/json`.
@@ -16023,21 +19295,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/401/content/application\/json`.
@@ -16097,21 +19377,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/tester-reveal/POST/responses/500/content/application\/json`.
@@ -16360,21 +19648,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/400/content/application\/json`.
@@ -16434,21 +19730,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/401/content/application\/json`.
@@ -16508,21 +19812,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/404/content/application\/json`.
@@ -16582,21 +19894,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/409/content/application\/json`.
@@ -16656,21 +19976,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/claim/POST/responses/500/content/application\/json`.
@@ -16913,21 +20241,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/400/content/application\/json`.
@@ -16987,21 +20323,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/401/content/application\/json`.
@@ -17061,21 +20405,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/404/content/application\/json`.
@@ -17135,21 +20487,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/409/content/application\/json`.
@@ -17209,21 +20569,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/429/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/429/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/429/content/application\/json`.
@@ -17283,21 +20651,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/send-offer-email/POST/responses/500/content/application\/json`.
@@ -17598,21 +20974,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/401/content/application\/json`.
@@ -17672,21 +21056,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/404/content/application\/json`.
@@ -17746,21 +21138,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/status/GET/responses/500/content/application\/json`.
@@ -18040,21 +21440,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/400/content/application\/json`.
@@ -18114,21 +21522,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/401/content/application\/json`.
@@ -18188,21 +21604,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/404/content/application\/json`.
@@ -18262,21 +21686,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/present/POST/responses/500/content/application\/json`.
@@ -18503,21 +21935,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/400/content/application\/json`.
@@ -18577,21 +22017,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/401/content/application\/json`.
@@ -18651,21 +22099,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/404/content/application\/json`.
@@ -18725,21 +22181,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/release/POST/responses/500/content/application\/json`.
@@ -18976,21 +22440,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/400/content/application\/json`.
@@ -19050,21 +22522,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/401/content/application\/json`.
@@ -19124,21 +22604,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/404/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/404/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/404/content/application\/json`.
@@ -19198,21 +22686,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/409/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/409/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/409/content/application\/json`.
@@ -19272,21 +22768,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/redemptions/{claimToken}/redeem/POST/responses/500/content/application\/json`.
@@ -19805,21 +23309,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/400/content/application\/json`.
@@ -19879,21 +23391,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/401/content/application\/json`.
@@ -19953,21 +23473,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/links/POST/responses/500/content/application\/json`.
@@ -20358,21 +23886,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/400/content/application\/json`.
@@ -20432,21 +23968,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/401/content/application\/json`.
@@ -20506,21 +24050,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/publisher/sdk/v1/creators/{creatorId}/stats/GET/responses/500/content/application\/json`.
@@ -20891,21 +24443,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/v1/events/POST/responses/400/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/v1/events/POST/responses/400/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/v1/events/POST/responses/400/content/application\/json`.
@@ -20965,21 +24525,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/v1/events/POST/responses/401/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/v1/events/POST/responses/401/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/v1/events/POST/responses/401/content/application\/json`.
@@ -21039,21 +24607,29 @@ internal enum Operations {
                         internal var error: Swift.String
                         /// - Remark: Generated from `#/paths/v1/events/POST/responses/500/content/json/details`.
                         internal var details: OpenAPIRuntime.OpenAPIValueContainer?
+                        /// Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
+                        ///
+                        /// - Remark: Generated from `#/paths/v1/events/POST/responses/500/content/json/code`.
+                        internal var code: Swift.String?
                         /// Creates a new `jsonPayload`.
                         ///
                         /// - Parameters:
                         ///   - error:
                         ///   - details:
+                        ///   - code: Machine-readable reason, set only on the few errors a client must branch on (each route that sets one says so in its description) and absent on every other. Treat an unknown value as absent.
                         internal init(
                             error: Swift.String,
-                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil
+                            details: OpenAPIRuntime.OpenAPIValueContainer? = nil,
+                            code: Swift.String? = nil
                         ) {
                             self.error = error
                             self.details = details
+                            self.code = code
                         }
                         internal enum CodingKeys: String, CodingKey {
                             case error
                             case details
+                            case code
                         }
                     }
                     /// - Remark: Generated from `#/paths/v1/events/POST/responses/500/content/application\/json`.

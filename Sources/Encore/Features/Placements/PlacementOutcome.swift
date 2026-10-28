@@ -11,8 +11,10 @@ import Foundation
 /// `switch await show()`.
 public enum PlacementOutcome: Sendable {
 
-    /// A presentation flow resolved. Yielded for every `show()` — including
-    /// `.notPresented` outcomes — with the placement that triggered it.
+    /// A presentation flow resolved. Yielded for every presentation — including
+    /// `.notPresented` outcomes — with the same result `show()` or `resume` delivers.
+    /// The one exception: a trigger's auto-open aborted before it showed, which is nothing happening.
+    /// Grant a ``PublisherReward`` from that result, not from here too.
     case presentation(placementId: String, result: PresentationResult)
 
     /// A strict-unlock verification completed **after** its flow ended —

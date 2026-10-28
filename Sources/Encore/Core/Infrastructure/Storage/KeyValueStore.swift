@@ -13,3 +13,10 @@ internal protocol KeyValueStore: Sendable {
     func save<T: Encodable>(_ value: T, to key: String)
     func remove(_ key: String)
 }
+
+/// Raw bytes by key, for callers that must tell "nothing stored" (nil) from
+/// "stored but unreadable" (a throw or bytes that fail to decode).
+internal protocol RawDataStore: Sendable {
+    func rawData(forKey key: String) throws -> Data?
+    func setRawData(_ data: Data, forKey key: String) throws
+}

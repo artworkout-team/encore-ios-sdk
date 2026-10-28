@@ -21,6 +21,9 @@ internal final class AnalyticsClient {
     private let sdkVersion: String
     private let appBundleId: String
     private let dedupStorage: KeyValueStore?
+    /// The locale the session's copy was served in, stamped on every envelope
+    /// as `locale` when known. Injected so tests need no configured SDK.
+    private let localeProvider: () -> String?
 
     /// Current user ID for event attribution. Atomic for thread-safe access.
     private let userId = Atomic<String?>(nil)
@@ -45,13 +48,26 @@ internal final class AnalyticsClient {
     nonisolated(unsafe) static var emissionObserverForTesting: ((EventEnvelope) -> Void)?
     #endif
 
-    init(sinks: [AnalyticsSink], sdkVersion: String, appBundleId: String, dedupStorage: KeyValueStore? = nil) {
+    init(
+        sinks: [AnalyticsSink],
+        sdkVersion: String,
+        appBundleId: String,
+        dedupStorage: KeyValueStore? = nil,
+        localeProvider: @escaping () -> String? = { AnalyticsClient.servedLocale(from: remoteConfigManager) }
+    ) {
         self.sinks = sinks
         self.sdkVersion = sdkVersion
         self.appBundleId = appBundleId
         self.dedupStorage = dedupStorage
+        self.localeProvider = localeProvider
     }
     
+    /// The locale of the copy on screen: read from the entry `SDKStrings.current`
+    /// takes its strings from, so the two never disagree.
+    static func servedLocale(from manager: RemoteConfigurationManager?) -> String? {
+        manager?.servedCopyConfig?.locale
+    }
+
     // MARK: - Encoding Helper
     
     /// Encode any Encodable to a snake_cased dictionary
@@ -66,7 +82,8 @@ internal final class AnalyticsClient {
     // MARK: - Event Tracking
     
     /// Track a typed analytics event. Uses stored userId if distinctId not provided.
-    func track<T: AnalyticsEvent>(_ event: T, distinctId: String? = nil) {
+    /// `locale` overrides the session's served locale, for a surface served on its own response.
+    func track<T: AnalyticsEvent>(_ event: T, distinctId: String? = nil, locale: String? = nil) {
         let resolvedId = EventEnvelope.resolveDistinctId(distinctId ?? userId.value)
 
         guard let properties = encode(event) else {
@@ -81,6 +98,11 @@ internal final class AnalyticsClient {
         ]
         if let appAccountId = userManager?.appAccountId {
             metadata["app_account_id"] = appAccountId
+        }
+        // Include-when-present: a pre-localization backend names no locale.
+        let override = locale.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+        if let locale = override ?? localeProvider(), !locale.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            metadata["locale"] = locale
         }
         
         // The one boundary every typed event crosses: an envelope that lost its
@@ -123,6 +145,8 @@ internal final class AnalyticsClient {
     /// This guarantees events are properly associated with the user.
     func identifyUser(userId: String, attributes: UserAttributes) {
         self.userId.value = userId
+        // The resolved age, never the date of birth: also what the dedup hash sees, so a birthday re-emits.
+        let attributes = attributes.forWire()
 
         var userProperties = encode(attributes) ?? [:]
         userProperties["user_id"] = userId

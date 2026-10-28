@@ -45,7 +45,7 @@ internal extension OfferContextEvent {
 /// Full event envelope sent to analytics sinks. Matches backend `EventEnvelope` schema.
 /// Created from AnalyticsEvent types by AnalyticsManager.
 internal struct EventEnvelope: Encodable, Sendable {
-    let eventId: String          // backend: event_id (deterministic UUID via SHA256)
+    let eventId: String          // backend: event_id (SHA256-derived UUID v4)
     let eventName: String        // backend: event_name (e.g. "offer_shown")
     let timestamp: Date          // backend: event_timestamp
     let distinctId: String       // backend: distinct_id
@@ -62,12 +62,12 @@ internal struct EventEnvelope: Encodable, Sendable {
         case metadata
     }
 
-    init(eventName: String, distinctId: String, properties: [String: Any], metadata: [String: String]) {
+    init(eventName: String, distinctId: String, properties: [String: Any], metadata: [String: String], timestamp: Date = Date()) {
         self.eventName = eventName
         self.distinctId = distinctId
         self.properties = properties.asOpenAPIProperties  // erase to the Codable carrier once; drops are logged
         self.metadata = metadata
-        self.timestamp = Date()
+        self.timestamp = timestamp
         self.eventId = Self.generateEventId(eventName: eventName, distinctId: distinctId, timestamp: timestamp)
     }
     
@@ -82,10 +82,22 @@ internal struct EventEnvelope: Encodable, Sendable {
         return "anonymous"
     }
 
-    /// Generate deterministic event ID using SHA256.
-    /// Uses microsecond precision to avoid collisions for multiple events within the same second.
+    private static let lastMicros = Atomic<Int64>(0)
+
+    /// Strictly increasing per process, so same-microsecond events never share an
+    /// event_id (BigQuery insertId dedup would drop one). The wire timestamp stays real.
+    private static func nextMicros(_ timestamp: Date) -> Int64 {
+        let now = Int64(timestamp.timeIntervalSince1970 * 1_000_000)
+        return lastMicros.mutate { last in
+            last = max(now, last + 1)
+            return last
+        }
+    }
+
+    /// Event ID: SHA256 of name, user and a unique microsecond value, formatted as a UUID v4.
+    /// Call once per event; the outbox stores the encoded body, so a resend keeps this id.
     static func generateEventId(eventName: String, distinctId: String, timestamp: Date) -> String {
-        let timestampMicros = Int64(timestamp.timeIntervalSince1970 * 1_000_000)
+        let timestampMicros = nextMicros(timestamp)
         let contentString = "\(eventName)_\(distinctId)_\(timestampMicros)"
         let hash = SHA256.hash(data: Data(contentString.utf8))
         let bytes = Array(hash.prefix(16))

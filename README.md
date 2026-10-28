@@ -21,6 +21,51 @@ Encore helps you reduce churn by presenting personalized retention offers (free 
 
 ---
 
+## Components
+
+Tell Encore where a gift button and a claim reminder sit; Encore decides the look, what happens
+after a claim, and counts views and taps.
+
+```swift
+import Encore
+
+Encore.shared.identify(userId: user.uid)
+
+GiftsButton(placement: "talk_milestone")
+
+ClaimReminder(placement: "discover_reminder")
+    .headline("60 min talking today!")
+```
+
+- **Text:** `.headline(_:)`, `.subheadline(_:)` and `.cta(_:)` set your own copy over the look's
+  (UIKit: the `headline`, `subheadline` and `cta` properties). A blank value keeps the look's text.
+- **Colours:** pass `appearance:` to style the component only; the sheet it opens keeps its own.
+- **Width:** a look keeps its design width on wide screens, centred; `alignment:` moves it to the
+  leading or trailing edge, in your app's layout direction.
+- **Opening by itself:** Encore may test a look that opens the sheet once by itself. Pass
+  `autoOpen: .off` to forbid it.
+
+### Your own view
+
+When the components don't fit your design, draw your own and let Encore drive it:
+
+```swift
+@StateObject private var claim = Encore.claim(placement: "streak")
+
+var body: some View {
+    switch claim.state {
+    case .gifts(let gifts), .thanks(let gifts): MyGiftButton(count: gifts.offerCount).encoreClaim(claim)
+    case .reminder(let reminder): MyReminder(reminder).encoreClaim(claim)
+    case .hidden: EmptyView()
+    }
+}
+```
+
+What it shows after a claim or a completion is set by Encore per placement, like a look. UIKit
+views attach with `let unbind = claim.bind(view)` (call `unbind()` when the view goes).
+
+---
+
 ## Privacy
 
 The SDK ships `PrivacyInfo.xcprivacy` in every distribution (SwiftPM, XCFramework, CocoaPods).
@@ -34,7 +79,7 @@ app-lifecycle events, and purchase links. Everything else arrives only when you 
 |:--|:--|
 | Any use of the SDK | Identifiers > Device ID; Usage Data > Product Interaction; Usage Data > Advertising Data |
 | Leaves `transactionLinking` on (default) | Purchases > Purchase History |
-| Calls `identify()` / `setUserAttributes()` | Identifiers > User ID, plus the attribute types you pass (email, name, phone, address, location) |
+| Calls `identify()` / `setUserAttributes()` | Identifiers > User ID, plus the attribute types you pass (email, name, phone, address, location, age) |
 
 Data the SDK collects on its own is declared **not linked to the user**: it carries a random
 per-install identifier and Apple's app-account identifier, neither of which tells us anything
@@ -52,6 +97,9 @@ Four things worth knowing before you fill the label in:
 - **`reset()`** clears the user id, attributes and cached entitlements on device. It does not
   clear Apple's app transaction identifier, which is Apple-Account-scoped and survives reinstall
   by design.
+- **`UserAttributes.age`** is whole years, 0 to 120; any other value is dropped with a warning.
+  If you hold only a range, pass its lowest end (`13-17` is 13). **`dateOfBirth`** is kept on
+  the device and sent only as the whole-year age it gives that day, the lower one if `age` is set too.
 - **`UserAttributes.custom`** is free-form, so the SDK cannot classify it. Whatever you put
   there, declare under the matching Apple data type.
 - **Nothing is used for tracking.** `NSPrivacyTracking` is `false`, there are no tracking

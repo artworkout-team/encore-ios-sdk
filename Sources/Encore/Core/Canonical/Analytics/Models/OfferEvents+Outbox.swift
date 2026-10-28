@@ -81,6 +81,8 @@ extension OutboxJob {
         // the record's correlation key.
         if let placementId { extra["placement_id"] = placementId }
         if let variantId { extra["variant_id"] = variantId }
+        // Reward for trying: always present, false without a claim, so the column is stable.
+        extra["user_confirmed_completion"] = result.claim?.userConfirmedCompletion ?? false
 
         switch result {
         case .notPresented(let reason):

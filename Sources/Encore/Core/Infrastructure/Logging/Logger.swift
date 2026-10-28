@@ -141,7 +141,15 @@ internal enum Logger {
         (configuration?.logLevel ?? .error) >= level
     }
 
+    #if DEBUG
+    /// Sees every message, at any level, before the level gate. Tests only.
+    nonisolated(unsafe) static var testSink: ((String) -> Void)?
+    #endif
+
     private static func log(level: Encore.LogLevel, concern: Concern, message: String) {
+        #if DEBUG
+        testSink?(message)
+        #endif
         guard isEnabled(level) else { return }
 
         // Defensive default: the never-crash standard outranks the

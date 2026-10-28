@@ -175,7 +175,8 @@ internal final class OutboxWorker: @unchecked Sendable {
             path: job.request.path,
             method: job.request.method,
             bodyData: job.request.body,
-            query: query
+            query: query,
+            headers: [:]
         )
     }
     

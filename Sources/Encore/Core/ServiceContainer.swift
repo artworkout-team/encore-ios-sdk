@@ -21,11 +21,15 @@ internal final class ServiceContainer: @unchecked Sendable {
     let errors: ErrorsClient
     let analytics: AnalyticsClient
     let outbox: OutboxManager
+    /// The encore-api client, for the few calls made outside a repository.
+    let oltpClient: HTTPClientProtocol
     // Note: AppLifecycle is process-scoped (static on Encore, not here)
     
     // MARK: - Domain Services (Configuration-Scoped)
     let user: UserManager
     let offers: OffersManager
+    /// Holds the launch warm-up until the app first becomes active; see `ForegroundGate`.
+    let foregroundGate = ForegroundGate()
     let entitlements: EntitlementManager
     let transactions: TransactionsManager
     
@@ -54,8 +58,8 @@ internal final class ServiceContainer: @unchecked Sendable {
         // Infrastructure
         // HTTP Client - mock only possible in DEBUG (EnvironmentDetector guarantees production in release)
         // Accept-Language is captured at init time from the device's preferred languages so the backend
-        // can serve localized copy. Hosts that need to override the locale should pass `attributes.language`
-        // via `identify(...)` — the backend prefers the explicit attribute over the header.
+        // can serve localized copy. Hosts that override it call `Encore.setLanguage(_:)`; the backend
+        // prefers that explicit language over the header.
         let acceptLanguage = LocaleHeader.preferredAcceptLanguage()
         let olapHttpClient = HTTPClient(baseURL: env.analyticsBaseURL, headers: ["X-Analytics-Key": configuration.apiKey, "X-Platform": "ios"])
         var oltpHeaders: [String: String] = ["X-API-Key": configuration.apiKey, "X-Platform": "ios"]
@@ -76,6 +80,7 @@ internal final class ServiceContainer: @unchecked Sendable {
             dedupStorage: storage
         )
         self.outbox = OutboxManager(oltpClient: oltpHttpClient, olapClient: olapHttpClient)
+        self.oltpClient = oltpHttpClient
         
         // Data Repositories
         let offersRepository = OffersRepository(client: oltpHttpClient)
@@ -90,7 +95,6 @@ internal final class ServiceContainer: @unchecked Sendable {
         userManager.configure()
         self.user = userManager
 
-        self.offers = OffersManager(repository: offersRepository, storage: storage)
         self.entitlements = EntitlementManager(entitlementsRepository: entitlementsRepository, userRepository: userRepository)
         self.transactions = TransactionsManager(repository: transactionsRepository)
         
@@ -105,9 +109,18 @@ internal final class ServiceContainer: @unchecked Sendable {
                 apiKey: configuration.apiKey
             ),
             environment: configuration.environment,
-            apiKey: configuration.apiKey
+            apiKey: configuration.apiKey,
+            deviceLocale: acceptLanguage
         )
-        self.remoteConfigManager = RemoteConfigurationManager(repository: remoteConfigRepository)
+        self.remoteConfigManager = RemoteConfigurationManager(
+            repository: remoteConfigRepository,
+            language: userManager.language
+        )
+        // The prefetch warms the offer a variant shows FIRST. Reads an Atomic, so safe off the main thread.
+        let configs = self.remoteConfigManager
+        self.offers = OffersManager(repository: offersRepository, storage: storage) { useCase in
+            useCase.flatMap { configs.config(for: $0)?.ui.template?.offerDisplayOrder }
+        }
         self.sduiConfigManager = SDUIConfigurationManager()
         self.experimentManager = ExperimentManager(repository: experimentRepository)
         

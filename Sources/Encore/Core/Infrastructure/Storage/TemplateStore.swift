@@ -9,22 +9,15 @@ import Foundation
 
 // MARK: - Stored Template
 
-/// One use case's last-known-good resolved template. The variant identity and
-/// template are an atomic pair by design: they are only ever written and read
-/// together, so a stored claim can always render.
-///
-/// Schema mirrored on Android: `{useCase, variantId, variantName, uiValues,
-/// template, savedAtMs, userId, language}`. `template` is the RAW wire JSON,
-/// not the parsed tree: robust across internal model changes, byte-stable, and
-/// symmetric with Android. `uiValues` is the use case's own values snapshot;
-/// only churn's config blob persists, so borrowing the blob's values for a
-/// rung-2 render would lose every other use case's dashboard copy. `userId`
-/// and `language` stamp the identity it was resolved for, so a read for a
-/// different identity treats it as absent rather than rendering another
-/// user's arm.
+/// One use case's last-known-good (variant, raw wire template, own values),
+/// written and read as one unit. `userId`, `language` and `deviceLocale` are
+/// the match key; `locale` is kept, never matched. Schema and rules:
+/// docs/architecture/localization.md.
 internal struct StoredTemplate: Codable, Sendable, Equatable {
     let useCase: String
     let variantId: String?
+    /// Experiment that decided `variantId`. Nil in files written before the field existed.
+    let experimentId: String?
     let variantName: String?
     /// The use case's values snapshot at resolution time.
     let uiValues: UIValues
@@ -33,31 +26,39 @@ internal struct StoredTemplate: Codable, Sendable, Equatable {
     let savedAtMs: Int64
     let userId: String
     let language: String?
+    let deviceLocale: String?
+    let locale: String?
 
     init(
         useCase: UseCase,
         variantId: String?,
+        experimentId: String? = nil,
         variantName: String?,
         uiValues: UIValues,
         template: Data,
         savedAtMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         userId: String,
-        language: String?
+        language: String?,
+        deviceLocale: String? = nil,
+        locale: String? = nil
     ) {
         self.useCase = useCase.rawValue
         self.variantId = variantId
+        self.experimentId = experimentId
         self.variantName = variantName
         self.uiValues = uiValues
         self.template = template
         self.savedAtMs = savedAtMs
         self.userId = userId
         self.language = language
+        self.deviceLocale = deviceLocale
+        self.locale = locale
     }
 
-    /// Whether this template was resolved for `userId`/`language`. A mismatch
-    /// means it is absent, never that it may be adapted.
-    func matches(userId: String, language: String?) -> Bool {
-        self.userId == userId && self.language == language
+    /// Whether this template was resolved for this identity. A mismatch means
+    /// it is absent, never that it may be adapted.
+    func matches(userId: String, language: String?, deviceLocale: String?) -> Bool {
+        self.userId == userId && self.language == language && self.deviceLocale == deviceLocale
     }
 }
 
@@ -134,12 +135,12 @@ internal final class TemplateStore: @unchecked Sendable {
 
     /// Reads the template for `useCase`, or nil when absent, unreadable, or
     /// stamped with a different identity.
-    func load(useCase: UseCase, userId: String, language: String?) -> StoredTemplate? {
+    func load(useCase: UseCase, userId: String, language: String?, deviceLocale: String? = nil) -> StoredTemplate? {
         queue.sync {
             let url = fileURL(forUseCaseRawValue: useCase.rawValue)
             guard let data = try? Data(contentsOf: url),
                   let stored = try? decoder.decode(StoredTemplate.self, from: data) else { return nil }
-            guard stored.matches(userId: userId, language: language) else {
+            guard stored.matches(userId: userId, language: language, deviceLocale: deviceLocale) else {
                 Logger.debug("TemplateStore: Ignoring \(useCase.rawValue) template stamped for another identity")
                 return nil
             }

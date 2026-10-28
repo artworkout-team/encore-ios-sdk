@@ -30,10 +30,6 @@ enum OfferSheetPresentationHost {
 
 /// Container view that hosts the offer sheet presentation flow.
 ///
-/// Manages transitions between:
-/// - Offers view (carousel of available offers)
-/// - Credit claimed view (success confirmation)
-///
 /// This is a pure SwiftUI view with no UIKit dependencies. Its host owns the
 /// surrounding window or view-controller navigation.
 @available(iOS 17.0, *)
@@ -43,14 +39,8 @@ struct OfferSheetContainer: View {
     
     enum PresentationState: Identifiable {
         case offers
-        case creditClaimed(amount: Double, result: Result<PresentationResult, EncoreError>)
-        
-        var id: String {
-            switch self {
-            case .offers: return "offers"
-            case .creditClaimed: return "creditClaimed"
-            }
-        }
+
+        var id: String { "offers" }
     }
     
     // MARK: - Properties
@@ -63,6 +53,8 @@ struct OfferSheetContainer: View {
     /// The only placement value stamped on this presentation's analytics.
     let placementLabel: String?
     let offerContext: OfferContext
+    /// The layout and variant resolved with the presentation style, for the whole presentation.
+    var layout: PresentationLayout? = nil
     let initialStateOverride: String?
     /// True when the IAP-first flow completed a real purchase before this
     /// sheet appeared — staged as the `.purchased` result floor.
@@ -129,6 +121,7 @@ struct OfferSheetContainer: View {
                 offerContext: offerContext,
                 initialStateOverride: initialStateOverride,
                 initiallyPurchased: initiallyPurchased,
+                layout: layout,
                 presentationHost: presentationHost,
                 onDismiss: {
                     switch presentationHost {
@@ -144,24 +137,15 @@ struct OfferSheetContainer: View {
                     handleOfferSheetCompletion(result)
                 }
             )
+            // Direction follows the copy, not the host: a host not localized
+            // for Arabic would otherwise lay served Arabic out left-to-right.
+            .modifier(ServedLayoutDirectionModifier(locale: offerContext.servedLocale))
             // No global safe-area ignore here. Safe-area policy is owned by the
             // SDUI root in OfferSheetView (SDUIRootSafeAreaModifier): on
             // fullScreenCover the root bleeds so a full-bleed background fills
             // all four safe areas, and the CONTENT re-insets itself via the
             // per-element `style.safeAreaPadding`; on sheet, natural behavior is
             // kept. `respectsSafeArea: false` opts the whole tree out.
-
-        case .creditClaimed(let amount, let result):
-            CreditClaimedView(
-                credit: CreditData(amount: amount),
-                offerContext: offerContext
-            ) {
-                handleCreditClaimedDismiss(result: result)
-            }
-            .presentationDetents([.fraction(0.32)])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(OfferSheetStyles.cornerRadius)
-            .presentationBackground(OfferSheetStyles.backgroundColor)
         }
     }
     
@@ -170,15 +154,4 @@ struct OfferSheetContainer: View {
     private func handleOfferSheetCompletion(_ result: Result<PresentationResult, EncoreError>) {
         onCompletion(result)
     }
-    
-    private func handleCreditClaimedDismiss(result _: Result<PresentationResult, EncoreError>) {
-        presentationState = nil
-    }
-}
-
-// MARK: - Supporting Types
-
-struct CreditData: Identifiable {
-    let id = UUID()
-    let amount: Double
 }

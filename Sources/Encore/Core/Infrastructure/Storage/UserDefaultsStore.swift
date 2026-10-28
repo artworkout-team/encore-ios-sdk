@@ -9,7 +9,7 @@ import Foundation
 /// Thread-safe (UserDefaults is thread-safe). Uses standard JSON coding.
 /// Note: @unchecked Sendable because JSONEncoder/JSONDecoder are thread-safe for read-only use.
 internal struct UserDefaultsStore: KeyValueStore, @unchecked Sendable {
-    private let defaults: UserDefaults
+    fileprivate let defaults: UserDefaults
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     
@@ -47,5 +47,22 @@ internal struct UserDefaultsStore: KeyValueStore, @unchecked Sendable {
     
     func remove(_ key: String) {
         defaults.removeObject(forKey: key)
+    }
+}
+
+// MARK: - RawDataStore
+
+extension UserDefaultsStore: RawDataStore {
+    struct UnreadableValue: Error {}
+
+    /// Throws when the key holds something other than bytes.
+    func rawData(forKey key: String) throws -> Data? {
+        guard let object = defaults.object(forKey: key) else { return nil }
+        guard let data = object as? Data else { throw UnreadableValue() }
+        return data
+    }
+
+    func setRawData(_ data: Data, forKey key: String) throws {
+        defaults.set(data, forKey: key)
     }
 }

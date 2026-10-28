@@ -21,9 +21,29 @@ class SheetDismissHandler {
 
     /// Record advertiser-funnel progress. Monotonic: a later, lower-ranked fact
     /// (e.g. a cooldown on a second offer) never erases an earned grant.
+    /// A user's confirmed completion belongs to the claim, not the stage: re-staging
+    /// that claim keeps it, and a same-rank claim of another offer never replaces it.
     func stageAdvertiser(_ outcome: AdvertiserOutcome) {
         guard Self.rank(outcome) >= Self.rank(advertiser) else { return }
+        if let current = advertiser.claimedOffer, current.userConfirmedCompletion,
+           let incoming = outcome.claimedOffer, !incoming.userConfirmedCompletion {
+            if incoming.isSameClaim(as: current) {
+                advertiser = outcome.confirmingCompletion()
+                return
+            }
+            if Self.rank(outcome) == Self.rank(advertiser) { return }
+        }
         advertiser = outcome
+    }
+
+    /// Mark the staged claim as confirmed by the user. Returns false, changing
+    /// nothing, when the staged outcome is not a claim of `claim`, or the sheet is
+    /// closing or closed (a close during a Yes's wait fails closed).
+    @discardableResult
+    func markUserConfirmedCompletion(for claim: ClaimedOffer) -> Bool {
+        guard !isEnding, let current = advertiser.claimedOffer, current.isSameClaim(as: claim) else { return false }
+        advertiser = advertiser.confirmingCompletion()
+        return true
     }
 
     /// Record publisher-funnel progress. Monotonic like the advertiser axis:
@@ -56,6 +76,9 @@ class SheetDismissHandler {
     /// `decline_reason` is always the record's `dismissal`, never a second
     /// vocabulary.
     var resolvedDismissal: DismissReason { delivered ?? dismissal ?? .userSwipedDown }
+
+    /// The sheet was asked to close (a staged dismissal) or its result was delivered.
+    var isEnding: Bool { completion == nil || dismissal != nil }
 
     /// Deliver on view disappearance; an unstaged ending means the user swiped.
     func handleOnDisappear() {

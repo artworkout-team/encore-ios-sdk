@@ -18,9 +18,8 @@ import UIKit
 
 /// Thread-safe, URL-keyed cache of dominant colors extracted from offer logos.
 ///
-/// Resolution strategy mirrors the existing image path: it reuses the same
-/// `URLCache.shared` that `CachedAsyncImage` warms, so once a logo has loaded
-/// the dominant color computes from the cached bytes without a second fetch.
+/// Reads logos through `SDUIImageLoader` at the logo ladder width, so a logo
+/// `CachedAsyncImage` already loaded computes from cached bytes with no second fetch.
 ///
 /// All public surface is safe to call from `@MainActor` render code. The heavy
 /// pixel work runs off the main thread; results are published back on the main
@@ -30,8 +29,9 @@ final class DominantColorStore: ObservableObject {
     static let shared = DominantColorStore()
 
     /// Neutral fallback returned before extraction completes (or when an image
-    /// can't be decoded). A mid grey reads acceptably under most chrome.
-    static let fallbackHex = "FF8E8E93"
+    /// can't be decoded). A mid grey reads acceptably under most chrome. Nonisolated so it can be
+    /// a default argument, which Swift 6.0 evaluates outside the main actor.
+    nonisolated static let fallbackHex = "FF8E8E93"
 
     /// urlString -> ARGB hex (8-digit, matching `Color(hex:)` semantics).
     @Published private(set) var colors: [String: String] = [:]
@@ -50,7 +50,7 @@ final class DominantColorStore: ObservableObject {
 
     /// Returns the dominant hex if available, otherwise the neutral fallback,
     /// and (when not already cached/in-flight) schedules async extraction.
-    /// Safe to call every render — idempotent and non-blocking.
+    /// Logo URLs only: extraction resolves at `logoWidthPoints`. Safe to call every render.
     @discardableResult
     func dominantHex(for urlString: String?, fallback: String = fallbackHex) -> String {
         guard let urlString, !urlString.isEmpty, let url = URL(string: urlString) else {
@@ -66,9 +66,10 @@ final class DominantColorStore: ObservableObject {
     private func scheduleExtraction(urlString: String, url: URL) {
         guard !inFlight.contains(urlString) else { return }
         inFlight.insert(urlString)
+        let resolved = SDUIImageLoader.resolve(url, widthPoints: SDUIImageLoader.logoWidthPoints)
 
         Task.detached(priority: .utility) {
-            let hex = await Self.extractHex(from: url)
+            let hex = await Self.extractHex(from: resolved)
             await self.finishExtraction(key: urlString, hex: hex)
         }
     }
@@ -123,13 +124,7 @@ final class DominantColorStore: ObservableObject {
     /// dominant color. Returns nil if the image can't be decoded.
     nonisolated private static func extractHex(from url: URL) async -> String? {
         #if canImport(UIKit)
-        let data: Data?
-        let request = URLRequest(url: url)
-        if let cached = URLCache.shared.cachedResponse(for: request) {
-            data = cached.data
-        } else {
-            data = try? await URLSession.shared.data(from: url).0
-        }
+        let data = try? await SDUIImageLoader.load(url).0
         guard let data, let image = UIImage(data: data) else { return nil }
         return Self.dominantHex(from: image)
         #else

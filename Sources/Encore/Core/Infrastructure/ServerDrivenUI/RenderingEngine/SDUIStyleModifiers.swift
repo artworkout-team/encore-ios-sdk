@@ -105,6 +105,10 @@ struct SDUIStyleModifier: ViewModifier {
             .modifier(SDUIScaleModifier(scale: active?.scale))
             .modifier(SDUIRotationModifier(degrees: active?.rotation))
             .modifier(SDUIOffsetModifier(offset: active?.offset))
+            // Trigger vocabulary; each is a no-op when its key is absent.
+            .modifier(SDUILoopModifier(loop: active?.loop))
+            .modifier(SDUILayoutDirectionModifier(direction: active?.layoutDirection))
+            .modifier(SDUIAccessibilityHiddenModifier(hidden: active?.accessibilityHidden))
             // Scroll-driven transforms wrap the composed element so they
             // animate the whole card (transform + fill) as it scrolls.
             .modifier(SDUIScrollTransitionModifier(transition: active?.scrollTransition))
@@ -123,16 +127,62 @@ struct SDUIPaddingModifier: ViewModifier {
 @available(iOS 17.0, *)
 struct SDUIFrameModifier: ViewModifier {
     let frame: SDUIFrame?
+    @Environment(\.sduiFrameCaps) private var caps
+    @Environment(\.sduiTriggerTree) private var triggerTree
+
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let sized = content
+            .environment(\.sduiFrameCaps, SDUIFrameCaps(frame, inside: caps))
             .frame(width: frame?.width, height: frame?.height)
-            .frame(
+        // In a trigger tree a finite maximum (with no minimum) only caps, as Android's widthIn
+        // does: the content keeps its own size up to it. SwiftUI's frame would take the cap.
+        let capWidth = triggerTree && frame?.minWidth == nil ? frame?.maxWidthValue.flatMap { $0.isFinite ? $0 : nil } : nil
+        let capHeight = triggerTree && frame?.minHeight == nil ? frame?.maxHeightValue.flatMap { $0.isFinite ? $0 : nil } : nil
+        if capWidth != nil || capHeight != nil {
+            SDUICapFrameLayout(maxWidth: capWidth, maxHeight: capHeight) { sized }
+                .frame(
+                    minWidth: frame?.minWidth,
+                    maxWidth: capWidth == nil ? frame?.maxWidthValue : nil,
+                    minHeight: frame?.minHeight,
+                    maxHeight: capHeight == nil ? frame?.maxHeightValue : nil,
+                    alignment: frame?.alignment?.alignment ?? .center
+                )
+        } else {
+            sized.frame(
                 minWidth: frame?.minWidth,
                 maxWidth: frame?.maxWidthValue,
                 minHeight: frame?.minHeight,
                 maxHeight: frame?.maxHeightValue,
                 alignment: frame?.alignment?.alignment ?? .center
             )
+        }
+    }
+}
+
+/// Offers its child at most the cap on each capped axis and takes the child's own size there.
+@available(iOS 17.0, *)
+struct SDUICapFrameLayout: Layout {
+    let maxWidth: CGFloat?
+    let maxHeight: CGFloat?
+
+    /// The cap applies to what is offered; an unbounded (ideal-size) proposal stays unbounded, so
+    /// under `fixedSize` the content keeps its own size and a shape never grows to the cap.
+    private func capped(_ proposal: ProposedViewSize) -> ProposedViewSize {
+        ProposedViewSize(
+            width: maxWidth.map { cap in proposal.width.map { min($0, cap) } } ?? proposal.width,
+            height: maxHeight.map { cap in proposal.height.map { min($0, cap) } } ?? proposal.height
+        )
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let size = child.sizeThatFits(capped(proposal))
+        return CGSize(width: maxWidth.map { min(size.width, $0) } ?? size.width, height: maxHeight.map { min(size.height, $0) } ?? size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }
 

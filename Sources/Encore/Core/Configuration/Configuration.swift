@@ -69,7 +69,7 @@ internal enum EnvironmentConfiguration: CustomStringConvertible, Equatable, Send
     
     var apiBaseURL: URL {
         let urlString: String = switch self {
-        case .local:       "http://localhost:4000/publisher/sdk/v1"
+        case .local:       "http://\(Self.localHost()):4000/publisher/sdk/v1"
         case .development: "https://api.dev.encorekit.com/publisher/sdk/v1"
         case .staging:     "https://api.staging.encorekit.com/publisher/sdk/v1"
         case .production:  "https://api.encorekit.com/encore/publisher/sdk/v1"
@@ -80,7 +80,7 @@ internal enum EnvironmentConfiguration: CustomStringConvertible, Equatable, Send
     
     var analyticsBaseURL: URL {
         let urlString: String = switch self {
-        case .local:       "http://localhost:8081/v1"
+        case .local:       "http://\(Self.localHost()):8081/v1"
         case .development: "https://api.dev.encorekit.com/analytics/v1"
         case .staging:     "https://api.staging.encorekit.com/analytics/v1"
         case .production:  "https://api.encorekit.com/analytics/v1"
@@ -89,6 +89,26 @@ internal enum EnvironmentConfiguration: CustomStringConvertible, Equatable, Send
         return safeURL(urlString)
     }
     
+    /// The host the `.local` environment talks to. DEBUG builds only: an `EncoreLocalHost`
+    /// process variable, else a saved `EncoreLocalHost` default (a demo's in-app switch, read at
+    /// launch), else the Info.plist value (e.g. the Mac's LAN IP); otherwise, and always in
+    /// release, `localhost`.
+    static func localHost(environment: [String: String]? = nil, savedValue: String?? = nil, infoValue: Any?? = nil) -> String {
+        #if DEBUG
+        let key = "EncoreLocalHost"
+        let processValue = (environment ?? ProcessInfo.processInfo.environment)[key]
+        let saved = savedValue ?? UserDefaults.standard.string(forKey: key)
+        let plistValue = (infoValue ?? Bundle.main.object(forInfoDictionaryKey: key)) as? String
+        let candidates = [processValue, saved, plistValue]
+        for case let value? in candidates {
+            let host = value.trimmingCharacters(in: .whitespaces)
+            // An unset xcconfig variable leaves the plist value empty or as "$(...)".
+            if !host.isEmpty, !host.hasPrefix("$("), !host.contains("/") { return host }
+        }
+        #endif
+        return "localhost"
+    }
+
     // MARK: - Infrastructure Builders
     
     /// Returns the analytics sinks for this environment.

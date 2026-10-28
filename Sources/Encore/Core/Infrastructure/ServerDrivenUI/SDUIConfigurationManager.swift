@@ -42,8 +42,15 @@ class SDUIConfigurationManager {
 
     // MARK: - Init
 
-    init(uiProvider: @escaping (UseCase) -> UIConfiguration? = { remoteConfigManager?.ui(for: $0) }) {
+    /// The session's SDK strings, read per floor render.
+    private let stringsProvider: () -> SDKStrings
+
+    init(
+        uiProvider: @escaping (UseCase) -> UIConfiguration? = { remoteConfigManager?.ui(for: $0) },
+        stringsProvider: @escaping () -> SDKStrings = { .current }
+    ) {
         self.uiProvider = uiProvider
+        self.stringsProvider = stringsProvider
     }
 
     // MARK: - Public Properties
@@ -75,8 +82,9 @@ class SDUIConfigurationManager {
     ///
     /// Returns `nil` only when the server explicitly resolved no template for
     /// a use case whose null is a decline (`resolvedNullDeclines`); the caller
-    /// must then no-op. See `layoutSource(for:)`.
-    func layout(for useCase: UseCase) -> SDUIConfig? {
+    /// must then no-op. See `layoutSource(for:)`. A mounted sheet passes its
+    /// presentation's `strings` so the floor copy cannot change language under it.
+    func layout(for useCase: UseCase, strings: SDKStrings? = nil) -> SDUIConfig? {
         #if DEBUG
         if !hasLoggedDevStatus {
             SDUIDevConfig.logStatus()
@@ -97,7 +105,7 @@ class SDUIConfigurationManager {
             return ui?.template
         case .floor:
             Logger.info("📦 [SDUIConfig] Rendering the \(useCase.rawValue) embedded floor")
-            return floor(for: useCase)
+            return floor(for: useCase).map { withServedBackstop($0, for: useCase, strings: strings ?? stringsProvider()) }
         case .declined:
             Logger.info("ℹ️ [SDUIConfig] Server resolved no \(useCase.rawValue) template, declining")
             return nil
@@ -118,9 +126,13 @@ class SDUIConfigurationManager {
     /// heals the moment the server ships a fix. The latch remains only for
     /// product validation failures, which need StoreKit IO to detect.
     func layoutSource(for useCase: UseCase) -> LayoutSource {
+        layoutSource(for: useCase, ui: uiProvider(useCase))
+    }
+
+    private func layoutSource(for useCase: UseCase, ui: UIConfiguration?) -> LayoutSource {
         if forcedFallback.contains(useCase) { return .floor }
 
-        guard let ui = uiProvider(useCase) else { return .floor }
+        guard let ui else { return .floor }
         if let template = ui.template {
             if !useCase.allowsIAP, Self.templateReferencesIAP(template) {
                 Logger.warn("⚠️ [SDUIConfig] \(useCase.rawValue) template references an IAP trigger on a claim-only surface, rendering its floor instead")
@@ -135,6 +147,14 @@ class SDUIConfigurationManager {
     /// Variant ID from remote config for `useCase`.
     func variantId(for useCase: UseCase) -> String? {
         uiProvider(useCase)?.variantId
+    }
+
+    /// The variant and its experiment from one read, so they always pair. The experiment
+    /// is reported only when its remote template renders: a floor render is no exposure.
+    func variant(for useCase: UseCase) -> (id: String?, experimentId: String?, renderedId: String?) {
+        let ui = uiProvider(useCase)
+        let rendersRemote = layoutSource(for: useCase, ui: ui) == .remote
+        return (ui?.variantId, rendersRemote ? ui?.experimentId : nil, rendersRemote ? ui?.variantId : nil)
     }
 
     /// Whether `useCase`'s layout requires IAP functionality.
@@ -167,6 +187,13 @@ class SDUIConfigurationManager {
         forcedFallback.insert(useCase)
     }
 
+    /// The layout, variant and experiment one presentation renders and reports, resolved together.
+    func presentationLayout(for useCase: UseCase, strings: SDKStrings) -> PresentationLayout {
+        let variant = variant(for: useCase)
+        return PresentationLayout(config: layout(for: useCase, strings: strings), variantId: variant.id,
+                                  experimentId: variant.experimentId, renderedVariantId: variant.renderedId)
+    }
+
     /// Clears the forced-fallback latch. Call alongside
     /// `RemoteConfigurationManager.clearCache()`, because a new identity's variant
     /// deserves a fresh validation, not the previous user's verdict.
@@ -191,6 +218,20 @@ class SDUIConfigurationManager {
             Logger.warn("❌ [SDUIConfig] Failed to parse the \(useCase.rawValue) floor: \(error)")
             return nil
         }
+    }
+
+    /// The churn floor with served `churn.floorTitle` / `churn.floorSubtitle`
+    /// over its English `initialValues` backstop, as Android does. The floor
+    /// bytes stay shared; host and dashboard copy still win at resolution.
+    private func withServedBackstop(_ floor: SDUIConfig, for useCase: UseCase, strings: SDKStrings) -> SDUIConfig {
+        guard useCase == .reduceChurn, var values = floor.initialValues else { return floor }
+        for (variable, key) in [("customHeadline", SDKStrings.Key.churnFloorTitle), ("customSubheadline", .churnFloorSubtitle)] {
+            guard values[variable] != nil, let served = strings.served(key) else { continue }
+            values[variable] = served
+        }
+        var patched = floor
+        patched.initialValues = values
+        return patched
     }
 
     // MARK: - Private Methods
@@ -230,5 +271,24 @@ class SDUIConfigurationManager {
         default:
             return false
         }
+    }
+}
+
+/// A presentation's layout and the variant its analytics report, taken once so
+/// a config that lands mid-flow cannot change either under it.
+struct PresentationLayout {
+    var config: SDUIConfig?
+    let variantId: String?
+    /// Nil when no experiment chose the variant or `config` is the floor.
+    var experimentId: String?
+    /// The variant whose remote template renders, sent on the claim; nil on a floor render,
+    /// where `variantId` still names the served variant the user never saw.
+    var renderedVariantId: String?
+
+    /// Swaps in the floor after the layout was taken: no experiment and no rendered variant.
+    mutating func renderFloor(_ floor: SDUIConfig?) {
+        config = floor
+        experimentId = nil
+        renderedVariantId = nil
     }
 }

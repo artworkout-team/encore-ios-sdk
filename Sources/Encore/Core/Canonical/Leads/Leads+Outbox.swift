@@ -18,17 +18,23 @@ extension OutboxJob {
     /// at email-send time so the affiliate platform can attribute the
     /// resulting click. See
     /// `docs/architecture/variants/asyncAdvertiserVerticalList.md`.
+    ///
+    /// `language` is the served locale of the sheet the email was captured
+    /// in, so the lead email and its reminders match it. Absent when blank.
+    /// Required, so a call site cannot drop it.
     static func submitLead(
         userId: String,
         campaignId: String,
         email: String,
         trialDurationDays: Int?,
-        transactionId: String
+        transactionId: String,
+        language: String?
     ) -> OutboxJob {
         let payload = DTO.Leads.SubmitRequest(
             userId: userId,
             campaignId: campaignId,
             email: email,
+            language: language.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 },
             trialDurationDays: trialDurationDays,
             transactionId: transactionId
         )

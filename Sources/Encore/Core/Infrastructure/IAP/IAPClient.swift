@@ -70,8 +70,8 @@ class IAPClient {
     /// no deadline of its own; unbounded, it held the tap-to-sheet path hostage
     /// (validation finding 2026-08-11 — same hazard class as the telemetry
     /// lookup bound near `delegatePurchase`). Timeout returns nil, logged
-    /// distinctly from not-found.
-    static func fetchProductInfo(productId: String, timeoutSeconds: TimeInterval = 5) async -> IAPProductInfo? {
+    /// distinctly from not-found. Periods are worded in `strings`, the presentation's snapshot.
+    static func fetchProductInfo(productId: String, strings: SDKStrings = .current, timeoutSeconds: TimeInterval = 5) async -> IAPProductInfo? {
         // Abandon-the-loser shape (same reason as `purchaseWithTimeout`): a
         // task group would await a StoreKit fetch that may not observe
         // cancellation, reinstating the stall this bound exists to prevent.
@@ -85,7 +85,7 @@ class IAPClient {
 
         return await withCheckedContinuation { continuation in
             let fetch = Task { @MainActor in
-                let info = await fetchProductInfoUnbounded(productId: productId)
+                let info = await fetchProductInfoUnbounded(productId: productId, strings: strings)
                 guard !flag.resumed else { return }
                 flag.resumed = true
                 timer.value?.cancel()
@@ -104,7 +104,7 @@ class IAPClient {
 
     /// Fetch product information without purchasing
     /// Returns product info if found, nil if product not found
-    private static func fetchProductInfoUnbounded(productId: String) async -> IAPProductInfo? {
+    private static func fetchProductInfoUnbounded(productId: String, strings: SDKStrings) async -> IAPProductInfo? {
         do {
             Logger.debug(.iap, "Fetching product info: \(productId)")
             
@@ -114,10 +114,14 @@ class IAPClient {
             }
             
             // Format subscription period if this is a subscription product
-            let period = formatSubscriptionPeriod(product.subscription?.subscriptionPeriod)
+            let period = product.subscription.flatMap { subscription in
+                periodUnit(subscription.subscriptionPeriod.unit).map {
+                    formatSubscriptionPeriod(value: subscription.subscriptionPeriod.value, unit: $0, strings: strings)
+                }
+            }
 
             // Extract intro offer (free trial OR pay-as-you-go OR pay-up-front)
-            let intro = extractIntroOfferInfo(from: product)
+            let intro = extractIntroOfferInfo(from: product, strings: strings)
 
             if intro.hasIntroOffer {
                 let kind = intro.introIsFreeTrial ? "free trial" : "intro offer"
@@ -145,21 +149,18 @@ class IAPClient {
         }
     }
     
-    /// Format subscription period as a readable string (e.g., "/month", "/year")
-    private static func formatSubscriptionPeriod(_ period: Product.SubscriptionPeriod?) -> String? {
-        guard let period = period else { return nil }
-        
-        switch period.unit {
-        case .day:
-            return period.value == 1 ? "/day" : "/\(period.value) days"
-        case .week:
-            return period.value == 1 ? "/week" : "/\(period.value) weeks"
-        case .month:
-            return period.value == 1 ? "/month" : "/\(period.value) months"
-        case .year:
-            return period.value == 1 ? "/year" : "/\(period.value) years"
-        @unknown default:
-            return nil
+    /// `${subscriptionPeriod}`, e.g. "/month" or "/3 months", in the served language.
+    static func formatSubscriptionPeriod(value: Int, unit: IntroOfferPeriodUnit, strings: SDKStrings) -> String {
+        strings.period(value, unit)
+    }
+
+    private static func periodUnit(_ unit: Product.SubscriptionPeriod.Unit) -> IntroOfferPeriodUnit? {
+        switch unit {
+        case .day: .day
+        case .week: .week
+        case .month: .month
+        case .year: .year
+        @unknown default: nil
         }
     }
     
@@ -195,44 +196,36 @@ class IAPClient {
     /// Day multipliers (week × 7, month × 30, year × 365) are approximations —
     /// fine for reminder scheduling. Apple's authoritative end date is shown
     /// in Settings → Subscriptions.
-    static func computeIntroOfferInfo(_ raw: IntroOfferRaw) -> IntroOfferDescriptor {
+    static func computeIntroOfferInfo(_ raw: IntroOfferRaw, strings: SDKStrings = .english) -> IntroOfferDescriptor {
         let totalValue = raw.periodValue * raw.periodCount
 
-        let unitStrings: (singular: String, plural: String, daysPerUnit: Int)
+        let daysPerUnit: Int
         switch raw.periodUnit {
-        case .day:   unitStrings = ("day", "days", 1)
-        case .week:  unitStrings = ("week", "weeks", 7)
-        case .month: unitStrings = ("month", "months", 30)
-        case .year:  unitStrings = ("year", "years", 365)
+        case .day:   daysPerUnit = 1
+        case .week:  daysPerUnit = 7
+        case .month: daysPerUnit = 30
+        case .year:  daysPerUnit = 365
         }
-        let unit = totalValue == 1 ? unitStrings.singular : unitStrings.plural
 
         return IntroOfferDescriptor(
             hasIntroOffer: true,
             introIsFreeTrial: raw.isFreeTrial,
             introOfferPrice: raw.displayPrice,
             introOfferValue: "\(totalValue)",
-            introOfferUnit: unit,
-            introOfferDuration: "\(totalValue) \(unit)",
-            introOfferDays: totalValue * unitStrings.daysPerUnit
+            introOfferUnit: strings.unit(raw.periodUnit, count: totalValue),
+            introOfferDuration: strings.duration(totalValue, raw.periodUnit),
+            introOfferDays: totalValue * daysPerUnit
         )
     }
 
     /// Bridge from StoreKit `Product` to the pure intro-offer math.
-    private static func extractIntroOfferInfo(from product: Product) -> IntroOfferDescriptor {
+    private static func extractIntroOfferInfo(from product: Product, strings: SDKStrings) -> IntroOfferDescriptor {
         guard let subscription = product.subscription,
               let intro = subscription.introductoryOffer else {
             return .none
         }
 
-        let unit: IntroOfferPeriodUnit
-        switch intro.period.unit {
-        case .day:   unit = .day
-        case .week:  unit = .week
-        case .month: unit = .month
-        case .year:  unit = .year
-        @unknown default: return .none
-        }
+        guard let unit = periodUnit(intro.period.unit) else { return .none }
 
         return computeIntroOfferInfo(IntroOfferRaw(
             isFreeTrial: intro.paymentMode == .freeTrial,
@@ -240,7 +233,7 @@ class IAPClient {
             periodValue: intro.period.value,
             periodUnit: unit,
             periodCount: intro.periodCount
-        ))
+        ), strings: strings)
     }
     
     // MARK: - Delegated Purchase

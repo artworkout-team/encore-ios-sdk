@@ -14,6 +14,14 @@ import Foundation
 /// enforces that all mutable state is accessed serially.
 internal actor OffersCache {
 
+    /// The variant's `offerDisplayOrder` for a use case, so the prefetch warms the offer shown FIRST.
+    /// Injected per instance by `ServiceContainer`; nil in tests.
+    private let displayOrder: @Sendable (UseCase?) -> [Int]?
+
+    init(displayOrder: @escaping @Sendable (UseCase?) -> [Int]? = { _ in nil }) {
+        self.displayOrder = displayOrder
+    }
+
     /// Cache TTL — 5 minutes.
     ///
     /// Not raised on purpose. The server's own staleness budget is 30s for the
@@ -23,30 +31,39 @@ internal actor OffersCache {
     /// real transaction against a campaign that is no longer buying. Five
     /// minutes is what iOS and Android already ship; the amplification fix is to
     /// make this TTL actually bind, not to widen it.
-    private static let cacheTTL: TimeInterval = 5 * 60
-
-    /// Max concurrent image preload requests.
-    private static let maxImageConcurrency = 6
+    static let cacheTTL: TimeInterval = 5 * 60
 
     /// What `/offers/search` actually varies on.
     ///
-    /// `countryCode` (geo eligibility) and `language` (creative locale) are the
-    /// only two attributes the endpoint reads functionally — every other
-    /// attribute a publisher merges leaves the eligible set byte-identical, so
-    /// it must not cost a round trip. Hosts that re-`identify()` on every
-    /// foreground with a churning attribute bag were refetching the same offers
-    /// each time.
-    private struct CacheKey: Equatable {
+    /// `countryCode` (geo eligibility) and `language` (creative locale) are in the
+    /// key. The search reads other attributes too (`custom` flags such as the
+    /// college-town boost, device signals), so a real change to them clears the
+    /// cache instead (`identify`, `setUserAttributes`); re-sending the same bag
+    /// on every foreground changes nothing and costs no round trip.
+    private struct CacheKey: Hashable {
         let userId: String
         let variantId: String?
+        /// The server resolves the surface from it when no variant is sent.
+        let useCase: UseCase?
+        /// Set only for a placement `/config` lists as ruled (HQ-0273).
+        let placementId: String?
         let countryCode: String?
         let language: String?
 
-        init(userId: String, variantId: String?, attributes: UserAttributes?) {
+        init(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase?, placementId: String?) {
             self.userId = userId
             self.variantId = variantId
+            self.useCase = useCase
+            self.placementId = placementId
             self.countryCode = attributes?.countryCode
-            self.language = attributes?.language
+            self.language = attributes?.languageTag
+        }
+
+        /// Who the set is for, apart from which surface. A prefetch for a
+        /// different identity supersedes; another surface for the same one
+        /// runs beside it.
+        func sameIdentity(as other: CacheKey) -> Bool {
+            userId == other.userId && countryCode == other.countryCode && language == other.language
         }
     }
 
@@ -56,70 +73,137 @@ internal actor OffersCache {
         let timestamp: Date
     }
 
-    private var cache: CacheEntry?
-    private var prefetchTask: Task<OfferResponse?, Never>?
-    private var inFlightKey: CacheKey?
+    /// One entry per key, so a ruled placement's set sits beside the shared one
+    /// instead of evicting it. Bounded by the TTL and the current user.
+    private var entries: [CacheKey: CacheEntry] = [:]
+    /// In flight per key, so a ruled placement's prefetch never cancels the
+    /// shared one (or the reverse).
+    private var prefetchTasks: [CacheKey: InFlight] = [:]
+    /// Bumped per key by `remove` and for every key by `clear`, so a direct fetch that
+    /// started before either cannot store its now-stale answer.
+    private var generations: [CacheKey: Int] = [:]
+    private var clearGeneration = 0
+
+    /// Where a fetch for these arguments stands; pass it back to `store(..., generation:)`.
+    func generation(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil) -> (clear: Int, key: Int) {
+        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId)
+        return (clearGeneration, generations[key] ?? 0)
+    }
+
+    private struct InFlight {
+        /// Tells this run apart from a later one for the same key, so a run
+        /// that finishes after `clear()` cannot drop its replacement.
+        let token: UUID
+        let task: Task<OfferResponse?, Never>
+    }
 
     // MARK: - Cache reads
 
     /// Returns cached response if fresh and matching, otherwise nil.
-    func cached(userId: String, variantId: String?, attributes: UserAttributes?) -> OfferResponse? {
-        cached(CacheKey(userId: userId, variantId: variantId, attributes: attributes))
+    func cached(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil) -> OfferResponse? {
+        cached(CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId))
+    }
+
+    /// When the live entry for these arguments stops being served, or nil when there is none.
+    func expiry(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil) -> Date? {
+        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId)
+        guard let entry = entries[key], !isExpired(entry) else { return nil }
+        return entry.timestamp.addingTimeInterval(Self.cacheTTL)
     }
 
     private func cached(_ key: CacheKey) -> OfferResponse? {
-        guard let entry = cache, entry.key == key, !isExpired(entry) else { return nil }
+        guard let entry = entries[key], !isExpired(entry) else { return nil }
         Logger.debug(.offers, "Using prefetched offers (\(entry.response.offerCount) offers, age=\(ageMs(entry))ms)")
         return entry.response
     }
 
     /// Returns the in-flight prefetch task if it matches this request, otherwise nil.
-    func inFlightTask(userId: String, variantId: String?, attributes: UserAttributes?) -> Task<OfferResponse?, Never>? {
-        inFlightTask(CacheKey(userId: userId, variantId: variantId, attributes: attributes))
+    func inFlightTask(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil) -> Task<OfferResponse?, Never>? {
+        inFlightTask(CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId))
     }
 
     private func inFlightTask(_ key: CacheKey) -> Task<OfferResponse?, Never>? {
-        guard inFlightKey == key, let task = prefetchTask, !task.isCancelled else { return nil }
+        guard let task = prefetchTasks[key]?.task, !task.isCancelled else { return nil }
         return task
     }
 
     /// Stores a response in the cache.
-    func store(userId: String, variantId: String?, attributes: UserAttributes?, response: OfferResponse) {
-        cache = CacheEntry(
-            key: CacheKey(userId: userId, variantId: variantId, attributes: attributes),
-            response: response,
-            timestamp: Date()
-        )
+    /// Stores only if nothing evicted this set (or cleared the cache) since `generation` was read.
+    func store(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil, response: OfferResponse, generation: (clear: Int, key: Int)) {
+        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId)
+        guard generation.clear == clearGeneration, generation.key == (generations[key] ?? 0) else {
+            Logger.debug(.offers, "Dropped a fetch that finished after its set was evicted")
+            return
+        }
+        store(key, response: response)
+    }
+
+    func store(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase? = nil, placementId: String? = nil, response: OfferResponse) {
+        store(CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId), response: response)
+    }
+
+    private func store(_ key: CacheKey, response: OfferResponse) {
+        // A live set replaced under a mounted trigger (a fresh prize-promise search): it re-gates.
+        let replacingLive = entries[key].map { !isExpired($0) } ?? false
+        entries = entries.filter { $0.key.userId == key.userId && !isExpired($0.value) }
+        entries[key] = CacheEntry(key: key, response: response, timestamp: Date())
+        if replacingLive { TriggerHeldOffers.changed() }
+    }
+
+    /// Stores a prefetch's set only while that run is still the key's own. The
+    /// check runs here, on the actor, because a clear() or a new identity can
+    /// land between the search returning and this call.
+    private func land(_ response: OfferResponse, key: CacheKey, token: UUID) -> Bool {
+        guard prefetchTasks[key]?.token == token else { return false }
+        store(key, response: response)
+        return true
     }
 
     // MARK: - Prefetch
 
+    #if DEBUG
+    /// Runs between a prefetch's search returning and its set being stored.
+    private var afterSearchForTesting: (@Sendable () async -> Void)?
+    func setAfterSearchForTesting(_ hook: (@Sendable () async -> Void)?) { afterSearchForTesting = hook }
+    #endif
+
     /// Fire-and-forget prefetch. Reuses an offer set the SDK already holds;
-    /// otherwise cancels any in-flight prefetch (latest identity wins).
+    /// otherwise cancels in-flight prefetches for another identity (latest
+    /// identity wins) and leaves other keys of the same identity running.
+    /// Returns the run it started, nil when it started none.
+    @discardableResult
     func startPrefetch(
         userId: String,
         attributes: UserAttributes?,
         variantId: String?,
+        useCase: UseCase? = nil,
+        placementId: String? = nil,
         search: @Sendable @escaping (String, UserAttributes?, String?) async throws -> OfferResponse
-    ) {
-        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes)
+    ) -> Task<OfferResponse?, Never>? {
+        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId)
 
         // The whole point of a TTL: warming what we already hold is a wasted
         // round trip. configure() → identify() → setUserAttributes() all warm
         // the same set within seconds of launch.
         if cached(key) != nil {
             Logger.debug(.offers, "Prefetch skipped — fresh offers already cached")
-            return
+            return nil
         }
         if inFlightTask(key) != nil {
             Logger.debug(.offers, "Prefetch skipped — one is already in flight for this identity")
-            return
+            return nil
         }
 
-        prefetchTask?.cancel()
-        inFlightKey = key
+        for (other, inFlight) in prefetchTasks where !other.sameIdentity(as: key) {
+            inFlight.task.cancel()
+            prefetchTasks[other] = nil
+        }
 
-        prefetchTask = Task { [weak self] in
+        let token = UUID()
+        #if DEBUG
+        let afterSearch = afterSearchForTesting
+        #endif
+        let run: @Sendable () async -> OfferResponse? = { [weak self] in
             do {
                 Logger.debug(.offers, "Prefetching offers for user: \(userId), variantId: \(variantId ?? "none")")
                 let response = try await search(userId, attributes, variantId)
@@ -127,11 +211,16 @@ internal actor OffersCache {
                     Logger.debug(.offers, "Prefetch cancelled for user: \(userId)")
                     return nil
                 }
-                await self?.store(userId: userId, variantId: variantId, attributes: attributes, response: response)
+                #if DEBUG
+                await afterSearch?()
+                #endif
+                guard await self?.land(response, key: key, token: token) == true else {
+                    Logger.debug(.offers, "Prefetch dropped for user: \(userId), the cache moved on while it ran")
+                    return nil
+                }
                 Logger.debug(.offers, "Prefetch complete: \(response.offerCount) offers cached")
 
-                // Preload images in a detached task so callers aren't blocked
-                Self.preloadImages(from: response)
+                await Self.preloadImages(from: response, displayOrder: self?.displayOrder(useCase))
                 return response
             } catch is CancellationError {
                 Logger.debug(.offers, "Prefetch cancelled for user: \(userId)")
@@ -141,14 +230,40 @@ internal actor OffersCache {
                 return nil
             }
         }
+        let task = Task { [weak self] () -> OfferResponse? in
+            let landed = await run()
+            // Leave the map before handing the result out, so a retry right
+            // behind a failed run is never skipped as already in flight.
+            await self?.finished(key, token: token)
+            return landed
+        }
+        prefetchTasks[key] = InFlight(token: token, task: task)
+        return task
     }
 
-    /// Clears cached offers and cancels in-flight prefetch.
+    /// Drops a finished prefetch, unless a newer run for the key replaced it.
+    private func finished(_ key: CacheKey, token: UUID) {
+        guard prefetchTasks[key]?.token == token else { return }
+        prefetchTasks[key] = nil
+    }
+
+    /// Drops one set and its in-flight prefetch; every other set stays.
+    func remove(userId: String, variantId: String?, attributes: UserAttributes?, useCase: UseCase?, placementId: String?) {
+        let key = CacheKey(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: placementId)
+        prefetchTasks[key]?.task.cancel()
+        prefetchTasks[key] = nil
+        entries[key] = nil
+        generations[key, default: 0] += 1
+    }
+
+    /// Clears cached offers and cancels in-flight prefetches.
     func clear() {
-        prefetchTask?.cancel()
-        prefetchTask = nil
-        inFlightKey = nil
-        cache = nil
+        for inFlight in prefetchTasks.values { inFlight.task.cancel() }
+        prefetchTasks = [:]
+        entries = [:]
+        // Per-key counts restart; the clear generation keeps pre-clear fetches out.
+        generations = [:]
+        clearGeneration += 1
         Logger.debug(.offers, "Cache cleared")
     }
 
@@ -157,39 +272,32 @@ internal actor OffersCache {
     private func isExpired(_ entry: CacheEntry) -> Bool { ageMs(entry) > Int(Self.cacheTTL * 1000) }
     private func ageMs(_ entry: CacheEntry) -> Int { max(0, Int(Date().timeIntervalSince(entry.timestamp) * 1000)) }
 
-    /// Every creative, hero and logo URL a response would render.
-    static func imageURLs(in response: OfferResponse) -> [URL] {
-        Array(Set(
-            response.offers.compactMap { offer -> [URL] in
-                // The hero coalesces to the creative, so a campaign without one
-                // contributes the same URL twice and the Set collapses it.
-                [offer.displayPrimaryImageUrl, offer.displayHeroImageUrl, offer.displayLogoUrl]
-                    .compactMap { $0.flatMap { URL(string: $0) } }
-            }.flatMap { $0 }
-        ))
+    /// The images to prefetch: only the offer the variant DISPLAYS first, which is not the
+    /// response's first when it sets `offerDisplayOrder`. Other offers load on display.
+    static func prefetchImageURLs(
+        in response: OfferResponse, displayOrder: [Int]? = nil, cardWidthPoints: CGFloat, scale: CGFloat
+    ) -> [URL] {
+        let ordered = displayOrder.map { SDUIContext.applyOfferDisplayOrder($0, to: response.offers) } ?? response.offers
+        guard let offer = ordered.first else { return [] }
+        return SDUIImageLoader.imageURLs(for: offer, cardWidthPoints: cardWidthPoints, scale: scale)
     }
 
-    /// Preloads creative images into URLSession's shared cache (shared with AsyncImage).
-    static func preloadImages(from response: OfferResponse) {
-        let urls = imageURLs(in: response)
-        guard !urls.isEmpty else { return }
-
+    /// Prefetches the first displayed offer's images into the SDK image cache. Returns the URLs it schedules.
+    @discardableResult
+    static func preloadImages(from response: OfferResponse, displayOrder: [Int]? = nil) async -> [URL] {
+        let (width, scale) = await MainActor.run { (SDUIImageLoader.defaultCardWidthPoints, SDUIImageLoader.screenScale) }
+        let urls = prefetchImageURLs(in: response, displayOrder: displayOrder, cardWidthPoints: width, scale: scale)
+        guard !urls.isEmpty else { return [] }
         Task.detached(priority: .utility) {
             Logger.debug(.offers, "Preloading \(urls.count) images")
             await withTaskGroup(of: Void.self) { group in
-                var launched = 0
                 for url in urls {
-                    if launched >= maxImageConcurrency {
-                        await group.next()
-                    }
-                    group.addTask {
-                        _ = try? await URLSession.shared.data(from: url)
-                    }
-                    launched += 1
+                    group.addTask { _ = try? await SDUIImageLoader.load(url) }
                 }
             }
             Logger.debug(.offers, "Image preload complete")
         }
+        return urls
     }
 }
 
@@ -204,11 +312,19 @@ internal struct OffersManager: Sendable {
     /// Where the per-use-case image-warm manifests live. Optional so tests can
     /// build a manager without one; with none, warming is simply never gated.
     private let storage: KeyValueStore?
+    private let displayOrder: @Sendable (UseCase?) -> [Int]?
 
-    init(repository: OffersRepository, storage: KeyValueStore? = nil) {
+    #if DEBUG
+    /// Test seam: the attributes each prefetch asks /offers with, so a test
+    /// can see the host language reach the request. Fired synchronously.
+    nonisolated(unsafe) internal static var prefetchAttributesObserverForTesting: ((UserAttributes?) -> Void)?
+    #endif
+
+    init(repository: OffersRepository, storage: KeyValueStore? = nil, displayOrder: @escaping @Sendable (UseCase?) -> [Int]? = { _ in nil }) {
         self.repository = repository
-        self.cache = OffersCache()
+        self.cache = OffersCache(displayOrder: displayOrder)
         self.storage = storage
+        self.displayOrder = displayOrder
     }
 
     // MARK: - Prefetch
@@ -218,15 +334,21 @@ internal struct OffersManager: Sendable {
     ///
     /// `placementId` is the publisher's label for the placement being warmed, if
     /// any: the launch-time warm has none, `placement(_:).prefetch()` does.
-    func prefetch(userId: String, attributes: UserAttributes?, variantId: String? = nil, placementId: String? = nil) {
+    /// `cachePlacementId` is the label a ruled placement keys the cache on, else nil.
+    func prefetch(userId: String, attributes: UserAttributes?, variantId: String? = nil, placementId: String? = nil, useCase: UseCase? = nil, cachePlacementId: String? = nil) {
+        #if DEBUG
+        Self.prefetchAttributesObserverForTesting?(attributes)
+        #endif
         let repo = repository
         Task {
             await cache.startPrefetch(
                 userId: userId,
                 attributes: attributes,
                 variantId: variantId,
+                useCase: useCase,
+                placementId: cachePlacementId,
                 search: { uid, attrs, vid in
-                    try await repo.search(userId: uid, attributes: attrs, sdkVersion: Encore.sdkVersion, variantId: vid, placementId: placementId)
+                    try await repo.search(userId: uid, attributes: attrs, sdkVersion: Encore.sdkVersion, variantId: vid, placementId: placementId, useCase: useCase)
                 }
             )
         }
@@ -234,19 +356,9 @@ internal struct OffersManager: Sendable {
 
     // MARK: - Bootstrap Image Warm
 
-    /// Warms `useCase`'s offer images into `URLCache.shared` once per device,
-    /// not once per launch.
-    ///
-    /// Two gates, either of which skips the extra `/offers/search`: the URLs the
-    /// last warm fetched are all still in the shared cache, or the last warm was
-    /// less than a day ago. The manifest alone was not enough — `URLCache.shared`
-    /// is small and creatives are large, so iOS evicts them within hours and the
-    /// gate then re-fetched the whole set on nearly every launch, once per
-    /// enabled use case, on both `configure()` and every `identify()`. That was
-    /// the single largest contributor to iOS's prefetch-to-show ratio. Re-warming
-    /// at most daily is safe: this only pre-populates an image cache, the offer
-    /// set it renders is fetched for real at `show()` time, and a cold image
-    /// costs latency, never correctness.
+    /// Warms the first offer's images for `useCase` into the SDK image cache, at most daily.
+    /// Skips the extra `/offers/search` when the last warm is under a day old or
+    /// every URL it fetched is still cached.
     func warmImagesIfNeeded(
         useCase: UseCase,
         userId: String,
@@ -271,10 +383,10 @@ internal struct OffersManager: Sendable {
                 userId: userId,
                 attributes: attributes,
                 sdkVersion: Encore.sdkVersion,
-                variantId: variantId
+                variantId: variantId,
+                useCase: useCase
             )
-            let urls = OffersCache.imageURLs(in: response)
-            OffersCache.preloadImages(from: response)
+            let urls = await OffersCache.preloadImages(from: response, displayOrder: displayOrder(useCase))
             storage?.save(WarmManifest(urls: urls.map(\.absoluteString)), to: key)
             Logger.debug(.offers, "Image warm for \(useCase.rawValue): \(urls.count) images")
         } catch {
@@ -311,7 +423,9 @@ internal struct OffersManager: Sendable {
 
     private static func isCached(_ urlString: String) -> Bool {
         guard let url = URL(string: urlString) else { return false }
-        return URLCache.shared.cachedResponse(for: URLRequest(url: url)) != nil
+        // Presence, not `cachedData`: that one is ladder-only, and before the host switch
+        // every URL is a bucket URL, so this gate would never fire.
+        return SDUIImageLoader.isCached(url)
     }
 
     // MARK: - Fetch Offers
@@ -328,25 +442,34 @@ internal struct OffersManager: Sendable {
     ///     request that filled the cache.
     ///   - maxPostbackTimeMs: Optional filter restricting offers to campaigns whose postback
     ///     latency fits within this window. Passed for strict unlock mode.
+    ///   - useCase: The surface being filled; part of the cache key.
+    ///   - cachePlacementId: Set only for a placement `/config` lists as ruled, which
+    ///     then gets its own cache entry; nil reuses the shared set, as today.
+    ///   - purpose: Sent only when this call reaches the network; see `OffersRepository.search`.
     func fetchOffers(
         userId: String,
         attributes: UserAttributes?,
         variantId: String? = nil,
         placementId: String? = nil,
-        maxPostbackTimeMs: Int? = nil
+        maxPostbackTimeMs: Int? = nil,
+        useCase: UseCase? = nil,
+        cachePlacementId: String? = nil,
+        publisherRewardDailyLimit: Int? = nil,
+        purpose: String? = nil
     ) async throws -> OfferResponse {
         guard !userId.isEmpty else {
             throw EncoreError.domain("userId cannot be empty")
         }
 
         // Cache/prefetch paths only apply to default (non-strict) fetches, since
-        // maxPostbackTimeMs changes the eligible offer set.
-        if maxPostbackTimeMs == nil {
-            if let cached = await cache.cached(userId: userId, variantId: variantId, attributes: attributes) {
+        // maxPostbackTimeMs changes the eligible offer set. A prize promise must be
+        // the server's current answer, and a cached list never asked for one.
+        if maxPostbackTimeMs == nil, publisherRewardDailyLimit == nil {
+            if let cached = await cache.cached(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId) {
                 return cached
             }
 
-            if let task = await cache.inFlightTask(userId: userId, variantId: variantId, attributes: attributes) {
+            if let task = await cache.inFlightTask(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId) {
                 Logger.debug(.offers, "Waiting for in-flight prefetch to complete")
                 if let result = await task.value {
                     Logger.debug(.offers, "Using just-completed prefetch (\(result.offerCount) offers)")
@@ -356,30 +479,25 @@ internal struct OffersManager: Sendable {
         }
 
         Logger.debug(.offers, "Fetching offers for user: \(userId), variantId: \(variantId ?? "none")")
+        let generation = await cache.generation(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId)
         let response = try await repository.search(
             userId: userId,
             attributes: attributes,
             sdkVersion: Encore.sdkVersion,
             variantId: variantId,
             placementId: placementId,
-            maxPostbackTimeMs: maxPostbackTimeMs
+            maxPostbackTimeMs: maxPostbackTimeMs,
+            useCase: useCase,
+            publisherRewardDailyLimit: publisherRewardDailyLimit,
+            purpose: purpose
         )
         if maxPostbackTimeMs == nil {
-            await cache.store(userId: userId, variantId: variantId, attributes: attributes, response: response)
+            // The list is reusable; the promise is only ever read fresh.
+            await cache.store(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId,
+                              response: response.withPublisherRewardPromise(nil), generation: generation)
         }
         Logger.info(.offers, "Received \(response.offerCount) offers")
         return response
-    }
-
-    /// Checks if there are any offers available.
-    func hasOffersAvailable(userId: String, attributes: UserAttributes?, variantId: String? = nil) async -> Bool {
-        do {
-            let response = try await fetchOffers(userId: userId, attributes: attributes, variantId: variantId)
-            return !response.offerList.isEmpty
-        } catch {
-            Logger.warn(.offers, "Failed to check availability: \(error)")
-            return false
-        }
     }
 
     // MARK: - Cache Management
@@ -387,5 +505,16 @@ internal struct OffersManager: Sendable {
     /// Clears cached offers. Call on reset/logout or when attributes change.
     func clearCache() {
         Task { await cache.clear() }
+    }
+
+    /// When the cached set `fetchOffers` would read for these arguments expires, or nil if none is held.
+    func cacheExpiry(userId: String, attributes: UserAttributes?, variantId: String?, useCase: UseCase?, cachePlacementId: String?) async -> Date? {
+        await cache.expiry(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId)
+    }
+
+    /// Drops the one cached set `fetchOffers` would read for these arguments, so the next
+    /// fetch for them searches again. Other use cases and placements keep theirs.
+    func evict(userId: String, attributes: UserAttributes?, variantId: String?, useCase: UseCase?, cachePlacementId: String?) async {
+        await cache.remove(userId: userId, variantId: variantId, attributes: attributes, useCase: useCase, placementId: cachePlacementId)
     }
 }

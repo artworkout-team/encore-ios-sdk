@@ -6,6 +6,9 @@ import SwiftUI
 
 @available(iOS 17.0, *)
 struct VerificationPendingView: View {
+    /// The presentation's snapshot. Verbatim, never a `LocalizedStringKey`: a bare
+    /// literal is looked up in the HOST app's bundle, where "Retry" means something else.
+    let strings: SDKStrings
     let isTimedOut: Bool
     let onRetry: () -> Void
     let onCancel: () -> Void
@@ -18,18 +21,19 @@ struct VerificationPendingView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
-                Text("Still verifying...")
+                Text(verbatim: strings[.verificationSlowTitle])
                     .font(.title3.weight(.semibold))
 
-                Text("Your completion is taking longer than expected.")
+                Text(verbatim: strings[.verificationSlowSubtitle])
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
                 VStack(spacing: 12) {
                     Button(action: onRetry) {
-                        Text("Retry")
+                        Text(verbatim: strings[.verificationRetry])
                             .font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
@@ -39,7 +43,7 @@ struct VerificationPendingView: View {
                     }
 
                     Button(action: onCancel) {
-                        Text("Cancel")
+                        Text(verbatim: strings[.verificationCancel])
                             .font(.body)
                             .foregroundStyle(.secondary)
                     }
@@ -50,10 +54,10 @@ struct VerificationPendingView: View {
                     .scaleEffect(1.5)
                     .padding(.bottom, 8)
 
-                Text("Verifying your completion...")
+                Text(verbatim: strings[.verifyingTitle])
                     .font(.title3.weight(.semibold))
 
-                Text("This usually takes a few seconds.")
+                Text(verbatim: strings[.verifyingSubtitle])
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

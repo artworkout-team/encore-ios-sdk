@@ -20,5 +20,7 @@ Encore.xcframework.zip
 Encore.dSYMs.zip
 Package.swift.bak
 EncoreKit.podspec
+# Each developer's own machine addresses for the demo (see Local.private.example.xcconfig).
+EncoreSwiftUIDemo/Configurations/Local.private.xcconfig
 .claude/
 .local-review/

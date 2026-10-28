@@ -9,7 +9,10 @@ import Foundation
 
 // MARK: - Action Types
 
-/// Action types supported by SDUI buttons
+/// Action types supported by SDUI buttons.
+///
+/// A type this build does not know decodes as ``unknown`` and does nothing, so
+/// one new action costs a dead button rather than the whole variant.
 enum SDUIActionType: String, Decodable, CaseIterable {
     case close
     case claimOffer
@@ -21,6 +24,21 @@ enum SDUIActionType: String, Decodable, CaseIterable {
     case triggerIAP    // Trigger IAP purchase, transition to onSuccessState on success
     case submitLead   // Validate email, check private relay, submit lead, transition to onSuccessState
     case share        // Present the system share sheet for the acting offer
+    case reportCompletion // The user says they finished the claimed offer; transition to onSuccessState
+    case trigger         // Trigger mounts: the host's tap with `target` (card | arrow | button). A no-op in a sheet
+    case dismissTrigger  // Trigger mounts: the host's dismiss. A no-op in a sheet
+    case unknown      // Any type this build does not recognise; a no-op
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SDUIActionType(rawValue: raw) ?? .unknown
+    }
+}
+
+/// What fired an action. An `onEnter` runs with no tap, so it never counts as the user's answer.
+enum SDUIActionTrigger {
+    case tap
+    case onEnter
 }
 
 /// Action configuration for buttons - supports both simple actions and parameterized actions
@@ -43,6 +61,8 @@ struct SDUIAction: Decodable {
     /// to the offer's fields rather than a free string, so a variant cannot
     /// hand the host an arbitrary scheme.
     var urlAttribute: SDUIOfferAttribute?
+    /// For `trigger`: which part of the trigger was tapped.
+    var target: String?
     
     // Convenience initializers for simple actions
     static let close = SDUIAction(type: .close)
@@ -83,9 +103,8 @@ struct SDUIAction: Decodable {
     init(from decoder: Decoder) throws {
         // Try to decode as a simple string first (backward compatibility)
         if let container = try? decoder.singleValueContainer(),
-           let typeString = try? container.decode(String.self),
-           let actionType = SDUIActionType(rawValue: typeString) {
-            self.type = actionType
+           let typeString = try? container.decode(String.self) {
+            self.type = SDUIActionType(rawValue: typeString) ?? .unknown
             self.setState = nil
             self.setValueKey = nil
             self.setValueValue = nil
@@ -103,6 +122,22 @@ struct SDUIAction: Decodable {
         // Otherwise decode as an object
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.type = try container.decode(SDUIActionType.self, forKey: .type)
+        // An action this build does not know is a no-op, so none of its fields are
+        // read: a future action may give a known key a value this build can't parse.
+        if type == .unknown {
+            self.setState = nil
+            self.setValueKey = nil
+            self.setValueValue = nil
+            self.onSuccessState = nil
+            self.onCancelAction = nil
+            self.targetKey = nil
+            self.offerIndex = nil
+            self.offerIndexDelta = nil
+            self.promoteToIndex = nil
+            self.setValueRef = nil
+            self.urlAttribute = nil
+            return
+        }
         self.setState = try container.decodeIfPresent(String.self, forKey: .setState)
         self.setValueKey = try container.decodeIfPresent(String.self, forKey: .setValueKey)
         self.setValueValue = try container.decodeIfPresent(String.self, forKey: .setValueValue)
@@ -114,11 +149,12 @@ struct SDUIAction: Decodable {
         self.promoteToIndex = try container.decodeIfPresent(Int.self, forKey: .promoteToIndex)
         self.setValueRef = try container.decodeIfPresent(SDUIValueRef.self, forKey: .setValueRef)
         self.urlAttribute = try container.decodeIfPresent(SDUIOfferAttribute.self, forKey: .urlAttribute)
+        self.target = try container.decodeIfPresent(String.self, forKey: .target)
     }
 
     private enum CodingKeys: String, CodingKey {
         case type, setState, setValueKey, setValueValue, onSuccessState, onCancelAction, targetKey
-        case offerIndex, offerIndexDelta, promoteToIndex, setValueRef, urlAttribute
+        case offerIndex, offerIndexDelta, promoteToIndex, setValueRef, urlAttribute, target
     }
 
     init(type: SDUIActionType, setState: String? = nil, setValueKey: String? = nil, setValueValue: String? = nil, onSuccessState: String? = nil, onCancelAction: String? = nil, targetKey: String? = nil, offerIndex: Int? = nil, offerIndexDelta: Int? = nil, promoteToIndex: Int? = nil, setValueRef: SDUIValueRef? = nil, urlAttribute: SDUIOfferAttribute? = nil) {

@@ -7,7 +7,17 @@
 import UIKit
 import SwiftUI
 
-/// Weak handle to the presentation window — structural evidence a `.presenting` phase is live.
+/// Set the moment a caller's task is cancelled, from whatever thread runs the cancellation
+/// handler, and read on the main actor right before a window is installed. A lock, not an
+/// actor: the read must be synchronous, and the iOS 15 floor rules out the newer primitives.
+private final class CallerCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func cancel() { lock.withLock { cancelled = true } }
+    var isCancelled: Bool { lock.withLock { cancelled } }
+}
+
 /// Weak handle to the host-owned controller, plus a latch. Once the host has
 /// placed it, leaving the hierarchy means the flow is dead rather than in flight.
 private final class ControllerBox {
@@ -16,6 +26,7 @@ private final class ControllerBox {
     init(_ v: UIViewController? = nil) { value = v }
 }
 
+/// Weak handle to the presentation window — structural evidence a `.presenting` phase is live.
 private final class WeakBox<T: AnyObject> {
     weak var value: T?
     init(_ v: T) { value = v }
@@ -62,12 +73,38 @@ internal final class OfferSheetCoordinator {
         var phase: Phase
     }
 
-    private static var current: ActivePresentation?
+    private static var current: ActivePresentation? {
+        didSet {
+            let showing = showingPresentationId(of: current)
+            guard showing != showingPresentationId(of: oldValue) else { return }
+            #if DEBUG
+            if let showing { EncoreDebugTrace.record("sheet.presented", ["presentationId": showing]) }
+            #endif
+            NotificationCenter.default.post(
+                name: .encoreSheetShowingDidChange, object: nil,
+                userInfo: showing.map { ["presentationId": $0] }
+            )
+        }
+    }
+
+    /// The presentation id of the sheet in Encore's own window, or nil while none is. Loading
+    /// and finished cover nothing; a host-owned controller lives in the host's hierarchy (and
+    /// may never be placed), so it is not announced.
+    static var showingPresentationId: String? { showingPresentationId(of: current) }
+
+    private static func showingPresentationId(of presentation: ActivePresentation?) -> String? {
+        guard let presentation else { return nil }
+        switch presentation.phase {
+        case .presenting: return presentation.coordinator.presentationId
+        case .loading, .presentingController, .finished: return nil
+        }
+    }
     /// Delivers the terminal result. `run()` resumes its own continuation
     /// through this; the controller path hands it to the caller instead,
     /// because that flow returns as soon as the controller exists.
     private var resultHandler: (@MainActor (PresentationResult) -> Void)?
     private var controllerContinuation: CheckedContinuation<UIViewController?, Never>?
+    private let callerCancellation = CallerCancellation()
     private let presentationTarget: PresentationTarget
     private let presentationId: String
     internal let placementId: String
@@ -83,16 +120,19 @@ internal final class OfferSheetCoordinator {
     private let copyOverrides: [String: String]
     /// Publisher brand colours for this presentation.
     private let appearance: AppearanceConfig?
+    /// The app's prize for this presentation (reward for trying).
+    private let publisherReward: PublisherReward?
 
     // MARK: - Init
 
-    private init(placementId: String, placementLabel: String? = nil, useCase: UseCase = .reduceChurn, copyOverrides: [String: String] = [:], appearance: AppearanceConfig? = nil, presentationId: String = UUID().uuidString, presentationTarget: PresentationTarget = .managedWindow) {
+    private init(placementId: String, placementLabel: String? = nil, useCase: UseCase = .reduceChurn, copyOverrides: [String: String] = [:], appearance: AppearanceConfig? = nil, publisherReward: PublisherReward? = nil, presentationId: String = UUID().uuidString, presentationTarget: PresentationTarget = .managedWindow) {
         self.presentationTarget = presentationTarget
         self.placementId = placementId
         self.placementLabel = placementLabel
         self.useCase = useCase
         self.copyOverrides = copyOverrides
         self.appearance = appearance
+        self.publisherReward = publisherReward
         self.presentationId = presentationId
     }
 
@@ -113,14 +153,23 @@ internal final class OfferSheetCoordinator {
     ///     the NCL experiment, and is stamped on every event emitted here.
     ///   - copyOverrides: Template-variable overrides from the placement builder.
     ///   - appearance: Brand colours from the placement builder.
+    ///   - publisherReward: The app's prize from the placement builder.
+    ///   - presentationId: The id to present under, when an entry point (a trigger) minted it
+    ///     to attribute its tap; otherwise a fresh one.
     static func present(
         placementId: String,
         placementLabel: String? = nil,
         useCase: UseCase = .reduceChurn,
         copyOverrides: [String: String] = [:],
-        appearance: AppearanceConfig? = nil
+        appearance: AppearanceConfig? = nil,
+        publisherReward: PublisherReward? = nil,
+        presentationId suppliedPresentationId: String? = nil,
+        cancelsWithTask: Bool = false
     ) async -> PresentationResult {
-        let (result, presentationId) = await presentCore(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance)
+        let (result, presentationId) = await presentCore(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance, publisherReward: publisherReward, presentationId: suppliedPresentationId, cancelsWithTask: cancelsWithTask)
+        // Aborted by its caller before it showed: nothing happened, so no placement row and no
+        // outcome (an error bucket would count a navigation as a failure).
+        guard result != .notPresented(.error(cancelledByCaller)) else { return result }
         publish(result, placementId: placementId, placementLabel: placementLabel, presentationId: presentationId, useCase: useCase, presentationTarget: .managedWindow)
         return result
     }
@@ -147,6 +196,10 @@ internal final class OfferSheetCoordinator {
             distinctId: EventEnvelope.resolveDistinctId()
         ))
         Encore.shared.yieldOutcome(.presentation(placementId: placementId, result: result))
+        // Every sheet's claim feeds the claim log, so a GiftsButton slot can turn into the reminder.
+        if case .presented(let outcome) = result, let userId = Encore.shared.services?.user.currentUserId {
+            ClaimLog.shared.record(outcome: outcome.advertiser, useCase: useCase, placement: placementLabel, userId: userId)
+        }
     }
 
     private static func presentCore(
@@ -154,16 +207,19 @@ internal final class OfferSheetCoordinator {
         placementLabel: String?,
         useCase: UseCase,
         copyOverrides: [String: String],
-        appearance: AppearanceConfig?
+        appearance: AppearanceConfig?,
+        publisherReward: PublisherReward?,
+        presentationId: String?,
+        cancelsWithTask: Bool = false
     ) async -> (PresentationResult, presentationId: String) {
-        switch makeAttempt(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance, presentationTarget: .managedWindow) {
+        switch makeAttempt(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance, publisherReward: publisherReward, presentationTarget: .managedWindow, presentationId: presentationId) {
         case .resolved(let result, let presentationId):
             return (result, presentationId)
         case .ready(let coordinator):
             // Ownership-checked: a resumed stale frame must not wipe a
             // successor flow's registration.
             defer { if current?.coordinator === coordinator { current = nil } }
-            return (await coordinator.run(), coordinator.presentationId)
+            return (await coordinator.run(cancelsWithTask: cancelsWithTask), coordinator.presentationId)
         }
     }
 
@@ -210,6 +266,7 @@ internal final class OfferSheetCoordinator {
         useCase: UseCase = .reduceChurn,
         copyOverrides: [String: String] = [:],
         appearance: AppearanceConfig? = nil,
+        publisherReward: PublisherReward? = nil,
         resume: @escaping @Sendable (PresentationResult) -> Void
     ) async -> UIViewController? {
         switch makeAttempt(
@@ -218,6 +275,7 @@ internal final class OfferSheetCoordinator {
             useCase: useCase,
             copyOverrides: copyOverrides,
             appearance: appearance,
+            publisherReward: publisherReward,
             presentationTarget: .hostController
         ) {
         case .resolved(let result, let presentationId):
@@ -257,8 +315,12 @@ internal final class OfferSheetCoordinator {
         useCase: UseCase,
         copyOverrides: [String: String],
         appearance: AppearanceConfig?,
-        presentationTarget: PresentationTarget
+        publisherReward: PublisherReward?,
+        presentationTarget: PresentationTarget,
+        presentationId suppliedPresentationId: String? = nil
     ) -> Attempt {
+        // A show before the app first became active starts the held warm-up; start() then joins it.
+        Encore.shared.services?.foregroundGate.open()
         // Resolved once for every gate event: the variant is a config-level
         // fact, known before any of them fire. Stays nil when remote config has
         // not resolved a variant for this use case.
@@ -266,7 +328,7 @@ internal final class OfferSheetCoordinator {
 
         // One presentation id for the whole attempt: gate events, in-sheet
         // events, IAP events, and the terminal record all join on it.
-        let presentationId = UUID().uuidString
+        let presentationId = suppliedPresentationId ?? UUID().uuidString
 
         // Diagnostic: prove the platform layer reached native presentation,
         // BEFORE any gate or early return. Reliable outbox so it survives every
@@ -329,18 +391,48 @@ internal final class OfferSheetCoordinator {
             break
         }
 
-        return .ready(OfferSheetCoordinator(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance, presentationId: presentationId, presentationTarget: presentationTarget))
+        return .ready(OfferSheetCoordinator(placementId: placementId, placementLabel: placementLabel, useCase: useCase, copyOverrides: copyOverrides, appearance: appearance, publisherReward: publisherReward, presentationId: presentationId, presentationTarget: presentationTarget))
     }
 
     // MARK: - Lifecycle
 
     /// Bridges the coordinator lifecycle to async/await via a single continuation.
-    private func run() async -> PresentationResult {
-        await withCheckedContinuation { continuation in
-            self.resultHandler = { continuation.resume(returning: $0) }
-            self.start()
+    /// The limit to ask the server about, or nil when no promise can be made: prizes
+    /// are promised only to users the app identified (anonymous ids reset on reinstall).
+    nonisolated static func publisherRewardDailyLimit(prize: PublisherReward?, isIdentified: Bool, policy: PublisherRewardPolicy) -> Int? {
+        guard let prize, prize.isUsable, isIdentified else { return nil }
+        return policy.dailyLimit
+    }
+
+    private func run(cancelsWithTask: Bool = false) async -> PresentationResult {
+        guard cancelsWithTask else {
+            return await withCheckedContinuation { continuation in
+                self.resultHandler = { continuation.resume(returning: $0) }
+                self.start()
+            }
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.resultHandler = { continuation.resume(returning: $0) }
+                self.start()
+            }
+        } onCancel: { [callerCancellation] in
+            // Recorded at once, so a load finishing ahead of the hop below still never shows.
+            callerCancellation.cancel()
+            Task { @MainActor [weak self] in self?.abortIfLoading() }
         }
     }
+
+    /// The caller went away before the sheet showed: resolve now, so no window is ever
+    /// installed. A sheet already on screen is left alone.
+    private func abortIfLoading() {
+        guard let active = Self.current, active.coordinator === self, case .loading = active.phase else { return }
+        Logger.info(.presentation, "Presentation \(presentationId) cancelled by its caller before it showed")
+        complete(.success(.notPresented(.error(Self.cancelledByCaller))))
+    }
+
+    /// The result's error when the caller cancelled before the sheet showed.
+    static let cancelledByCaller = EncoreError.domain("presentation cancelled before it showed")
 
     /// Runs the same pipeline but resolves as soon as the controller exists.
     /// The terminal result arrives later, through `onCompletion`.
@@ -369,7 +461,6 @@ internal final class OfferSheetCoordinator {
             guard let self else { return }
 
             let userId = entitlementsManager.currentUserId
-            let attributes = entitlementsManager.userAttributes
             let useCase = self.useCase
 
             // The availability ladder, uniform across use cases: join an
@@ -384,14 +475,22 @@ internal final class OfferSheetCoordinator {
                 for: useCase,
                 userId: userId,
                 sdkVersion: Encore.sdkVersion,
-                language: userManager?.userAttributes.language
+                language: userManager?.language
             )
 
-            // Get variant ID from remote config manager (pre-fetched on user identify).
-            let variantId: String? = sduiConfigManager?.variantId(for: useCase)
-            Logger.debug(.configuration, "OfferPresentation reading useCase=\(useCase.rawValue), variantId=\(variantId ?? "nil"), hasRemoteConfig=\(remoteConfigManager?.config(for: useCase) != nil)")
+            // One snapshot for the whole presentation, taken before any await:
+            // a language change while /offers is in flight cannot mix configs,
+            // templates or the variant analytics report.
+            let config = remoteConfigManager?.config(for: useCase)
+            let servedLocale = remoteConfigManager?.servedLocale(for: useCase)
+            // /offers asks for the same language the strings below were served in.
+            let attributes = userManager?.requestAttributes ?? entitlementsManager.userAttributes
+            let strings = SDKStrings.current
+            var layout = sduiConfigManager?.presentationLayout(for: useCase, strings: strings)
+            let variantId = layout?.variantId
+            Logger.debug(.configuration, "OfferPresentation reading useCase=\(useCase.rawValue), variantId=\(variantId ?? "nil"), hasRemoteConfig=\(config != nil)")
 
-            analyticsClient.track(OfferPresentationTriggeredEvent(presentationId: presentationId, variantId: variantId, useCase: useCase, placementId: self.placementLabel))
+            analyticsClient.track(OfferPresentationTriggeredEvent(presentationId: presentationId, variantId: variantId, experimentId: layout?.experimentId, useCase: useCase, placementId: self.placementLabel))
 
             // KILL SWITCH: the only remaining decline. A layout of nil now
             // means the server explicitly resolved no template for this use
@@ -401,10 +500,10 @@ internal final class OfferSheetCoordinator {
             // show() to explicit UI, where a silent decline is a broken button.
             // Checked before /offers so a declined presentation never burns
             // offer inventory either.
-            if sduiConfigManager?.layout(for: useCase) == nil {
+            if layout?.config == nil {
                 Logger.info(.presentation, "Server resolved no \(useCase.rawValue) template, no UI shown")
                 analyticsClient.track(
-                    OfferPresentationFailedEvent(reason: NotPresentedReason.useCaseUnavailable, presentationId: presentationId, variantId: variantId, useCase: useCase, placementId: self.placementLabel)
+                    OfferPresentationFailedEvent(reason: NotPresentedReason.useCaseUnavailable, presentationId: presentationId, variantId: variantId, experimentId: layout?.experimentId, useCase: useCase, placementId: self.placementLabel)
                 )
                 self.complete(.success(.notPresented(.useCaseUnavailable)))
                 return
@@ -419,22 +518,32 @@ internal final class OfferSheetCoordinator {
                 // both, so serializing them stacked their latencies on the
                 // tap-to-sheet path (validation finding, 2026-08-11).
                 let resolvedIAPProductId: String? = useCase.allowsIAP
-                    ? (remoteConfigManager?.iapProductId(for: useCase) ?? attributes.iapProductId)
+                    ? (config?.entitlements.iapProductId ?? attributes.iapProductId)
                     : nil
                 let productInfoTask: Task<IAPProductInfo?, Never>? = resolvedIAPProductId.map { productId in
-                    Task { await IAPClient.fetchProductInfo(productId: productId) }
+                    Task { await IAPClient.fetchProductInfo(productId: productId, strings: strings) }
                 }
 
-                let response = try await offersManager.fetchOffers(
+                let fetched = try await offersManager.fetchOffers(
                     userId: userId,
                     attributes: attributes,
                     variantId: variantId,
                     placementId: self.placementLabel,
-                    maxPostbackTimeMs: maxPostbackTimeMs
+                    maxPostbackTimeMs: maxPostbackTimeMs,
+                    useCase: useCase,
+                    cachePlacementId: remoteConfigManager?.cachePlacement(for: self.placementLabel),
+                    publisherRewardDailyLimit: Self.publisherRewardDailyLimit(
+                        prize: self.publisherReward,
+                        isIdentified: userManager?.isIdentified ?? false,
+                        policy: Encore.shared.publisherRewardPolicy
+                    )
                 )
+                // Offers this user already said they finished: hidden here even when the
+                // list came from the cache or predates the server's own exclusion.
+                let response = Encore.shared.selfReportedCampaigns.excluding(from: fetched, userId: userId)
                 guard !response.offerList.isEmpty else {
                     analyticsClient.track(
-                        OfferPresentationFailedEvent(reason: NotPresentedReason.noOffers, presentationId: presentationId, variantId: variantId, useCase: useCase, placementId: self.placementLabel)
+                        OfferPresentationFailedEvent(reason: NotPresentedReason.noOffers, presentationId: presentationId, variantId: variantId, experimentId: layout?.experimentId, useCase: useCase, placementId: self.placementLabel)
                     )
                     self.complete(.success(.notPresented(.noOffers)))
                     return
@@ -445,6 +554,7 @@ internal final class OfferSheetCoordinator {
                         presentationId: presentationId,
                         offerCount: "\(response.offerCount)",
                         variantId: variantId,
+                        experimentId: layout?.experimentId,
                         useCase: useCase,
                         placementId: self.placementLabel
                     )
@@ -464,33 +574,36 @@ internal final class OfferSheetCoordinator {
                         if let productInfo = await productInfoTask?.value {
                             iapContext = IAPContext(from: productInfo)
                             Logger.debug(.iap, "Fetched subscription: \(productInfo.displayPrice)\(productInfo.subscriptionPeriod ?? "")")
-                        } else if sduiConfigManager?.requiresIAP(for: useCase) == true {
+                        } else if layout?.config.map(SDUIConfigurationManager.templateReferencesIAP) == true {
                             Logger.warn(.iap, "Config requires IAP but product '\(iapProductId)' not found - using fallback config")
-                            sduiConfigManager?.useFallbackConfig(for: useCase, reason: "Invalid IAP product: \(iapProductId)")
+                            fallBackToFloor(&layout, strings: strings, reason: "Invalid IAP product: \(iapProductId)")
                         }
-                    } else if sduiConfigManager?.requiresIAP(for: useCase) == true {
+                    } else if layout?.config.map(SDUIConfigurationManager.templateReferencesIAP) == true {
                         Logger.warn(.iap, "Config requires IAP but no iapProductId configured - using fallback config")
-                        sduiConfigManager?.useFallbackConfig(for: useCase, reason: "No iapProductId configured")
+                        fallBackToFloor(&layout, strings: strings, reason: "No iapProductId configured")
                     }
                 }
 
                 // Create offer context combining remote config and IAP data
                 let offerContext = OfferContext(
-                    uiValues: remoteConfigManager?.ui(for: useCase)?.values,
-                    entitlements: remoteConfigManager?.entitlements(for: useCase),
+                    uiValues: config?.ui.values,
+                    entitlements: config?.entitlements,
                     iap: iapContext,
                     useCase: useCase,
                     copyOverrides: self.copyOverrides,
-                    appearance: self.appearance
+                    appearance: self.appearance,
+                    publisherReward: self.publisherReward,
+                    servedLocale: servedLocale,
+                    strings: strings
                 )
 
                 // Check for IAP-First flow
-                if useCase.allowsIAP, sduiConfigManager?.layout(for: useCase)?.triggerIAPFirst == true {
+                if useCase.allowsIAP, layout?.config?.triggerIAPFirst == true {
                     guard let iapProductIdForPurchase = iapProductId else {
                         Logger.warn(.iap, "triggerIAPFirst is true but no iapProductId configured")
-                        sduiConfigManager?.useFallbackConfig(for: useCase, reason: "No iapProductId for triggerIAPFirst")
+                        fallBackToFloor(&layout, strings: strings, reason: "No iapProductId for triggerIAPFirst")
                         if #available(iOS 17.0, *) {
-                            self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
+                            self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, layout: layout, initialStateOverride: nil)
                         }
                         return
                     }
@@ -503,7 +616,7 @@ internal final class OfferSheetCoordinator {
                         if #available(iOS 17.0, *) {
                             // The purchase already happened — stage it so the
                             // record carries it however the sheet ends.
-                            self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil, initiallyPurchased: true)
+                            self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, layout: layout, initialStateOverride: nil, initiallyPurchased: true)
                         }
                     } else {
                         Logger.info(.iap, "Purchase cancelled or failed - dismissing")
@@ -522,21 +635,24 @@ internal final class OfferSheetCoordinator {
                 }
 
                 if #available(iOS 17.0, *) {
-                    self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, initialStateOverride: nil)
+                    self.presentOfferSheet(response: response, userId: userId, offerContext: offerContext, layout: layout, initialStateOverride: nil)
                 }
             } catch let error as EncoreError {
+                // Cancelled by an abort that already resolved the flow: not a failure to report.
+                guard !Task.isCancelled else { return }
                 Logger.error(error, context: .fetchOfferData)
                 // A total offers-API outage used to produce ZERO events —
                 // presentation_failed is the only iOS-side evidence of it.
                 analyticsClient.track(
-                    OfferPresentationFailedEvent(reason: .error(error), presentationId: presentationId, variantId: variantId, useCase: useCase, placementId: self.placementLabel)
+                    OfferPresentationFailedEvent(reason: .error(error), presentationId: presentationId, variantId: variantId, experimentId: layout?.experimentId, useCase: useCase, placementId: self.placementLabel)
                 )
                 self.complete(.failure(error))
             } catch {
+                guard !Task.isCancelled else { return }
                 let wrapped = EncoreError.transport(.network(error))
                 Logger.error(wrapped, context: .fetchOfferData)
                 analyticsClient.track(
-                    OfferPresentationFailedEvent(reason: .error(wrapped), presentationId: presentationId, variantId: variantId, useCase: useCase, placementId: self.placementLabel)
+                    OfferPresentationFailedEvent(reason: .error(wrapped), presentationId: presentationId, variantId: variantId, experimentId: layout?.experimentId, useCase: useCase, placementId: self.placementLabel)
                 )
                 self.complete(.failure(wrapped))
             }
@@ -544,19 +660,30 @@ internal final class OfferSheetCoordinator {
         Self.current = ActivePresentation(coordinator: self, phase: .loading(task: task))
     }
 
+    /// Latches `useCase`'s floor and moves the presentation's snapshot onto it.
+    /// The floor is no exposure, so the experiment is dropped with the template.
+    private func fallBackToFloor(_ layout: inout PresentationLayout?, strings: SDKStrings, reason: String) {
+        sduiConfigManager?.useFallbackConfig(for: useCase, reason: reason)
+        layout?.renderFloor(sduiConfigManager?.layout(for: useCase, strings: strings))
+    }
+
     @available(iOS 17.0, *)
-    private func presentOfferSheet(response: OfferResponse, userId: String, offerContext: OfferContext, initialStateOverride: String?, initiallyPurchased: Bool = false) {
+    private func presentOfferSheet(response: OfferResponse, userId: String, offerContext: OfferContext, layout: PresentationLayout?, initialStateOverride: String?, initiallyPurchased: Bool = false) {
         // The flow may already have resolved — presenting now would leak a
         // window nobody owns or tears down.
         guard resultHandler != nil else {
             Logger.warn(.presentation, "Skipping presentation — flow already resolved")
             return
         }
+        // The caller (a trigger's auto pop) went away while this loaded: never show.
+        guard !callerCancellation.isCancelled else {
+            return complete(.success(.notPresented(.error(Self.cancelledByCaller))))
+        }
         Logger.info(.presentation, "Presenting offer sheet with \(response.offerCount) offers")
 
         // Resolved once for the life of this presentation, so a remote refresh
         // cannot switch the mode under mounted content.
-        let presentationStyle = sduiConfigManager?.layout(for: offerContext.useCase)?.presentationStyle ?? .sheet
+        let presentationStyle = layout?.config?.presentationStyle ?? .sheet
         let presentationHost: OfferSheetPresentationHost
         let dismissalRelay: OfferSheetViewControllerDismissalRelay?
         switch presentationTarget {
@@ -574,6 +701,7 @@ internal final class OfferSheetCoordinator {
             placementId: placementId,
             placementLabel: placementLabel,
             offerContext: offerContext,
+            layout: layout,
             initialStateOverride: initialStateOverride,
             initiallyPurchased: initiallyPurchased,
             presentationHost: presentationHost,
@@ -635,6 +763,20 @@ internal final class OfferSheetCoordinator {
 
     // MARK: - Completion
 
+    #if DEBUG
+    /// The result's advertiser outcome in one word, for the DEBUG trace.
+    private static func traceOutcome(_ result: PresentationResult) -> String {
+        guard case .presented(let outcome) = result else { return "notPresented" }
+        switch outcome.advertiser {
+        case .notAttempted: return "notAttempted"
+        case .claimed: return "claimed"
+        case .verified: return "verified"
+        case .cooldown: return "cooldown"
+        case .failed: return "failed"
+        }
+    }
+    #endif
+
     /// Single completion path — idempotent.
     /// Handles cleanup based on current phase:
     /// - `.loading`: cancels in-flight task, no window to tear down
@@ -656,6 +798,9 @@ internal final class OfferSheetCoordinator {
         self.controllerContinuation = nil
 
         let collapsed = Self.collapse(result)
+        #if DEBUG
+        EncoreDebugTrace.record("sheet.closed", ["outcome": Self.traceOutcome(collapsed)])
+        #endif
 
         // Phase-based cleanup (only if this coordinator owns current)
         if let active = Self.current, active.coordinator === self {

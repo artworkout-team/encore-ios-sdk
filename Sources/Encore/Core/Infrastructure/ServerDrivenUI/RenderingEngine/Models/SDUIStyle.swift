@@ -104,7 +104,11 @@ struct SDUIColor {
     /// Full resolver: resolves the base color (including data bindings against
     /// `values`) then applies any transforms.
     func resolved(in appearance: Appearance, values: [String: String]?) -> Color {
-        Self.applyTransforms(transforms, to: baseColor(in: appearance, values: values))
+        var transforms = transforms
+        // A node's opacity fades only the text-colour fallback of `secondary`/`track`, never a
+        // colour the publisher set.
+        if case .appearance(let token) = base, appearance.isPublisherSet(token) { transforms.opacity = nil }
+        return Self.applyTransforms(transforms, to: baseColor(in: appearance, values: values))
     }
 
     private func baseColor(in appearance: Appearance, values: [String: String]?) -> Color {
@@ -189,6 +193,21 @@ extension SDUIColor: Decodable {
 
 // MARK: - Typography
 
+extension SDUIFont {
+    private enum CodingKeys: String, CodingKey { case size, weight, monospacedDigits, tracking }
+
+    /// `weight` may be left out (regular), as the shared range table's cases write a font.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            size: try container.decode(CGFloat.self, forKey: .size),
+            weight: try container.decodeIfPresent(SDUIFontWeight.self, forKey: .weight) ?? .regular,
+            monospacedDigits: try container.decodeIfPresent(Bool.self, forKey: .monospacedDigits),
+            tracking: try container.decodeIfPresent(CGFloat.self, forKey: .tracking)
+        )
+    }
+}
+
 enum SDUIFontWeight: String, Decodable {
     case ultraLight, thin, light, regular, medium, semibold, bold, heavy, black
     
@@ -223,9 +242,11 @@ enum SDUIFontWeight: String, Decodable {
     }
 }
 
-struct SDUIFont: Decodable {
+struct SDUIFont: Decodable, Equatable {
     let size: CGFloat
     let weight: SDUIFontWeight
+    /// Fixed-width digits, so a ticking clock does not jitter.
+    var monospacedDigits: Bool?
     /// Letter spacing in points, as designs specify it (negative = tighter).
     ///
     /// Not part of `font`, because SwiftUI applies tracking as a TEXT modifier
@@ -605,6 +626,12 @@ struct SDUIStyle: Decodable {
     /// A state this map does not name falls back to the base style, so the
     /// closed box is authored once in the ordinary fields.
     var stateStyles: [String: SDUIStateStyle]?
+    /// A repeating animation (trigger mounts pause it offscreen and in the background, holding its pose; reduce motion stills it).
+    var loop: SDUILoop?
+    /// Forces the subtree's layout direction (a clock reads left to right in every language).
+    var layoutDirection: SDUILayoutDirection?
+    /// Hides the element from accessibility (decorative icons and logos).
+    var accessibilityHidden: Bool?
     /// How to interpolate between those states. Absent means a hard cut, which
     /// is what every shipped variant does today.
     var stateAnimation: SDUIAnimationSpec?

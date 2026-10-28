@@ -17,7 +17,7 @@ import Foundation
 /// Example:
 /// ```swift
 /// let iapContext = IAPContext(from: productInfo)
-/// let offerContext = OfferContext(uiValues: config.ui.values, entitlements: config.entitlements, iap: iapContext)
+/// let offerContext = OfferContext(uiValues: config.ui.values, entitlements: config.entitlements, iap: iapContext, servedLocale: locale)
 /// // Now "${subscriptionPrice}" in templates resolves to the IAP price
 /// // And "${appName}" resolves to the server-configured app name
 /// ```
@@ -47,6 +47,16 @@ struct OfferContext {
     /// Publisher brand colours for this presentation (`placement(...).appearance(_:)`).
     let appearance: AppearanceConfig?
 
+    /// The app's prize for this placement (`placement(...).publisherReward(_:)`).
+    let publisherReward: PublisherReward?
+
+    /// The locale the backend served this copy in; drives the sheet's layout direction.
+    let servedLocale: String?
+
+    /// The SDK strings this presentation renders with, taken once so a
+    /// language change mid-sheet cannot mix two languages.
+    let strings: SDKStrings
+
     // MARK: - Initialization
 
     /// Creates an OfferContext with the given configuration and IAP data
@@ -56,7 +66,10 @@ struct OfferContext {
         iap: IAPContext = .empty,
         useCase: UseCase = .reduceChurn,
         copyOverrides: [String: String] = [:],
-        appearance: AppearanceConfig? = nil
+        appearance: AppearanceConfig? = nil,
+        publisherReward: PublisherReward? = nil,
+        servedLocale: String?,
+        strings: SDKStrings = .current
     ) {
         self.uiValues = uiValues
         self.entitlements = entitlements
@@ -64,10 +77,13 @@ struct OfferContext {
         self.useCase = useCase
         self.copyOverrides = copyOverrides
         self.appearance = appearance
+        self.publisherReward = publisherReward
+        self.servedLocale = servedLocale
+        self.strings = strings
     }
 
     /// Creates an empty context (for fallback scenarios)
-    static let empty = OfferContext(uiValues: nil, entitlements: nil, iap: .empty)
+    static var empty: OfferContext { OfferContext(uiValues: nil, entitlements: nil, iap: .empty, servedLocale: nil) }
     
     // MARK: - Template Variables
     
@@ -111,6 +127,14 @@ struct OfferContext {
             // empty string here would silently drop the bold branch, and with it
             // the design.
             if let v = values.rewardSubheadline { variables["rewardSubheadline"] = v }
+            // Nil when the variant words its buttons itself, serving no token.
+            // Written on ANY non-nil value, "" included, like `rewardHeadline`:
+            // a blank button beats a literal `${rewardCta}` on screen.
+            if let v = values.rewardCta { variables["rewardCta"] = v }
+            if let v = values.rewardDecline { variables["rewardDecline"] = v }
+            if let v = values.rewardBadge { variables["rewardBadge"] = v }
+            if let v = values.rewardMoreGifts { variables["rewardMoreGifts"] = v }
+            if let v = values.rewardOtherGifts { variables["rewardOtherGifts"] = v }
         }
 
         // Extract entitlement values
@@ -119,15 +143,14 @@ struct OfferContext {
                 variables["trialValue"] = v
             }
             if let v = entitlements.entitlementUnit {
-                variables["trialUnit"] = v
+                variables["trialUnit"] = Self.dashboardTrialUnit(v, value: entitlements.entitlementValue, strings: strings)
             }
             if let v = entitlements.premiumTierName {
                 variables["premiumTierName"] = v
             }
         }
-        // Fallback: premiumTierName defaults to "{appName} Premium" if not set
         if variables["premiumTierName"] == nil, let appName = uiValues?.appName {
-            variables["premiumTierName"] = "\(appName) Premium"
+            variables["premiumTierName"] = strings.format(.premiumTierName, ["appName": appName])
         }
         
         // Add IAP properties (these take precedence over remote config)
@@ -213,6 +236,34 @@ struct OfferContext {
     /// the template branches on it, so no default is substituted here.
     var subheadlineText: String? { allVariables[useCase.subheadlineVariable] }
     
+    /// Churn copy that replaces the default title pair: the host's
+    /// `.headline()`, else dashboard `customHeadline` when it says something
+    /// other than the title (the backend fills it from the title). Blank is absent.
+    var churnHeadlineOverride: String? {
+        if let host = Self.nonBlank(copyOverrides[UseCase.reduceChurn.headlineVariable]) { return host }
+        guard let dashboard = Self.nonBlank(uiValues?.customHeadline), dashboard != uiValues?.title else { return nil }
+        return dashboard
+    }
+
+    /// The host's `.subheadline()`, else dashboard `customSubheadline`. Blank is absent.
+    var churnSubheadlineOverride: String? {
+        Self.nonBlank(copyOverrides[UseCase.reduceChurn.subheadlineVariable]) ?? Self.nonBlank(uiValues?.customSubheadline)
+    }
+
+    /// The dashboard's English unit word ("months") in the served locale when it
+    /// serves that unit and the value is a whole number; else the word as sent.
+    static func dashboardTrialUnit(_ unit: String, value: String?, strings: SDKStrings = .current) -> String {
+        guard let key = SDKStrings.PluralKey.unitName(forEnglishWord: unit),
+              let count = value.flatMap({ Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }),
+              let served = strings.servedPlural(key, count: count) else { return unit }
+        return served
+    }
+
+    private static func nonBlank(_ value: String?) -> String? {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return value
+    }
+
     /// Accent color hex from UI values
     var accentColor: String? { uiValues?.accentColor }
     

@@ -34,6 +34,8 @@ struct SDUIElementRenderer: View {
     /// to every child the way `category` is.
     var instructionStep: Instruction? = nil
     var isCurrentPage: Bool = false
+    /// The row of a `hostList` loop (trigger mounts); nil everywhere else.
+    @Environment(\.sduiHostItem) var hostItem
 
     /// Observed so the tree re-renders when a logo's dominant color is
     /// extracted asynchronously, letting `{"binding": "offerDominantColor"}`
@@ -51,6 +53,11 @@ struct SDUIElementRenderer: View {
 
     /// True when an ANCESTOR is an offer row.
     @Environment(\.sduiInsideOfferRow) private var inheritedInsideOfferRow
+    @Environment(\.sduiInsideControl) private var insideControl
+    /// The trigger tree's scale groups; nil elsewhere, where `scaleGroup` is ignored.
+    @Environment(\.sduiScaleGroups) private var scaleGroups
+    @Environment(\.sduiTriggerTree) private var triggerTree
+    @Environment(\.sduiFrameCaps) private var frameCaps
 
     /// True when this node sits inside an offer row, at any depth.
     private var isInsideOfferRow: Bool { isOfferRow || inheritedInsideOfferRow }
@@ -99,6 +106,8 @@ struct SDUIElementRenderer: View {
         case .toggle(let config): config.style
         case .slideButton(let config): config.style
         case .confetti(let config): config.style
+        case .progress(let config): config.style
+        case .marquee(let config): config.style
         case .conditional, .compactPageIndicator, .empty: nil
         }
     }
@@ -134,7 +143,7 @@ struct SDUIElementRenderer: View {
     }
 
     /// Terse wrapper threading `colorValues` into color resolution.
-    private func resolveColor(_ color: SDUIColor?) -> Color? {
+    func resolveColor(_ color: SDUIColor?) -> Color? {
         context.resolveColor(color, extraValues: colorValues)
     }
     
@@ -142,11 +151,29 @@ struct SDUIElementRenderer: View {
     private func renderElement(_ element: SDUIElement) -> some View {
         switch element {
         case .text(let config):
-            renderText(config)
+            if let group = config.scaleGroup, let scaleGroups, config.segments?.isEmpty ?? true {
+                let measure = scaleMeasure(config)
+                SDUIScaleGroupMember(group: group, measure: measure, alignment: config.multilineAlignment, groups: scaleGroups) { factor in
+                    if let countdown = config.countdown {
+                        // Its room is its widest text, so the offered width never ticks.
+                        renderCountdownText(config, countdown: countdown, scale: factor, sample: factor == nil ? measure.widest : nil)
+                    } else {
+                        renderSingleText(config, effectiveLineSpacing: calculateLineSpacing(config), scale: factor)
+                    }
+                }
+            } else if let countdown = config.countdown {
+                renderCountdownText(config, countdown: countdown)
+            } else {
+                renderText(config)
+            }
         case .systemImage(let config):
             renderSystemImage(config)
         case .asyncImage(let config):
-            renderAsyncImage(config)
+            if let fallback = config.fallback {
+                renderAsyncImageWithFallback(config, fallback: fallback)
+            } else {
+                renderAsyncImage(config)
+            }
         case .asyncVideo(let config):
             renderAsyncVideo(config)
         case .appIcon(let config):
@@ -168,7 +195,11 @@ struct SDUIElementRenderer: View {
         case .scrollView(let config):
             renderScrollView(config)
         case .forEach(let config):
-            renderForEach(config)
+            if config.dataSource == .hostList {
+                renderHostListForEach(config)
+            } else {
+                renderForEach(config)
+            }
         case .conditional(let config):
             renderConditional(config)
         case .group(let config):
@@ -183,6 +214,10 @@ struct SDUIElementRenderer: View {
             renderCompactPageIndicator(config)
         case .confetti(let config):
             renderConfetti(config)
+        case .progress(let config):
+            renderProgress(config)
+        case .marquee(let config):
+            renderMarquee(config)
         case .empty:
             EmptyView()
         }
@@ -190,6 +225,14 @@ struct SDUIElementRenderer: View {
     
     // MARK: - Text Renderer
     
+    /// One key out of the row's display-properties bag, or nil when it carries none.
+    ///
+    /// Row-scoped: inside a `forEach` this reads THAT row. Anywhere else it reads the
+    /// offer the context points at, which is the carousel's scroll position.
+    func resolveOfferProperty(_ key: String) -> String? {
+        (offer ?? context.currentOffer)?.displayProperties[key]
+    }
+
     /// Resolves a text binding using the item-specific offer (for forEach loops) or falls back to context
     ///
     /// Internal, like `evaluateCondition`, so a test can drive the row path
@@ -206,7 +249,7 @@ struct SDUIElementRenderer: View {
             case .offerPerk:
                 return itemOffer.perk ?? ""
             case .offerCtaText:
-                return itemOffer.displayCtaText ?? "Get"
+                return context.strings.offerCta(itemOffer)
             case .offerQuickInstructions:
                 return itemOffer.displayQuickInstructions ?? ""
             case .instructionTitle:
@@ -215,40 +258,51 @@ struct SDUIElementRenderer: View {
                 return instructionStep?.subtitle ?? ""
             case .instructionCtaText:
                 return instructionStep?.ctaButtonText ?? ""
+            case .instructionNumber:
+                return instructionStep?.position.map(String.init) ?? ""
             case .offerNewPrice:
                 return itemOffer.newPrice ?? ""
             case .offerOldPrice:
                 return itemOffer.oldPrice ?? ""
             case .categoryName:
-                return category ?? ""
+                return category.map(context.strings.giftCategory) ?? ""
             default:
                 // For non-offer bindings, fall back to context
                 return context.resolveText(binding)
             }
         }
-        if binding == .categoryName { return category ?? "" }
+        // The label is translated; conditions and filters keep the English group.
+        if binding == .categoryName { return category.map(context.strings.giftCategory) ?? "" }
         // A step loop can run outside a row, where the offer is nil and the
         // switch above never ran. The step is still in scope.
         switch binding {
         case .instructionTitle: return instructionStep?.title ?? ""
         case .instructionSubtitle: return instructionStep?.subtitle ?? ""
         case .instructionCtaText: return instructionStep?.ctaButtonText ?? ""
+        case .instructionNumber: return instructionStep?.position.map(String.init) ?? ""
         default: break
         }
         // No item-specific offer, use context (which uses currentOffer)
         return context.resolveText(binding)
     }
     
-    private func resolveText(_ config: SDUIText) -> String {
+    /// Internal, like `evaluateCondition` and `resolveTextBinding`, so a test can drive
+    /// the row path directly rather than the lookup helper this calls.
+    func resolveText(_ config: SDUIText) -> String {
+        // Offer property first: it is the most specific source and never a template.
+        if let key = config.propertyKey {
+            return resolveOfferProperty(key) ?? ""
+        }
+
         // First, check for valueKey (direct read from context.values)
-        if let valueKey = config.valueKey, let value = context.values[valueKey] {
-            return context.resolveTemplateText(value)
+        if let valueKey = config.valueKey, let value = context.textValues(row: offer)[valueKey] {
+            return context.resolveTemplateText(value, row: offer)
         }
 
         // Check for textMapKey (dynamic text from text maps)
         if let mapKey = config.textMapKey {
             let valueKey = config.textMapValueKey ?? mapKey
-            if let resolvedText = context.resolveTextMap(mapKey: mapKey, valueKey: valueKey) {
+            if let resolvedText = context.resolveTextMap(mapKey: mapKey, valueKey: valueKey, row: offer) {
                 return resolvedText
             }
             // Fall back to static text if map lookup fails
@@ -260,7 +314,7 @@ struct SDUIElementRenderer: View {
         }
         
         // Resolve template placeholders (${variableName}) in the text
-        return context.resolveTemplateText(config.text)
+        return context.resolveTemplateText(substituteHostItem(config.text), row: offer)
     }
     
     @ViewBuilder
@@ -287,8 +341,13 @@ struct SDUIElementRenderer: View {
         }
     }
 
-    private func renderSingleText(_ config: SDUIText, effectiveLineSpacing: CGFloat) -> some View {
+    /// `scale` is a scale group's factor: the font is drawn at it and never shrinks further.
+    private func renderSingleText(_ config: SDUIText, effectiveLineSpacing: CGFloat, scale: CGFloat? = nil) -> some View {
         let resolved = resolveText(config)
+        let font = scale.map { (config.font ?? .unstyled).scaled($0) } ?? config.font
+        #if DEBUG
+        if let font, scale != nil { SDUIScaleGroups.recordDrawn(key: resolved, text: resolved, size: font.size) }
+        #endif
         let baseColor = resolveColor(config.color) ?? context.appearance.semanticColor(.label)
 
         // A `*marked*` run only becomes a separate run when the author asked for
@@ -298,7 +357,7 @@ struct SDUIElementRenderer: View {
         if let highlight = config.highlightColor.flatMap({ resolveColor($0) }) {
             text = Self.highlightedText(
                 resolved,
-                font: config.font,
+                font: font,
                 baseColor: baseColor,
                 highlightColor: highlight
             )
@@ -306,7 +365,7 @@ struct SDUIElementRenderer: View {
             text = Text(resolved)
         }
 
-        if let font = config.font {
+        if let font {
             text = text.applySDUIFont(font)
         }
         if config.strikethrough == true {
@@ -321,7 +380,28 @@ struct SDUIElementRenderer: View {
             .lineSpacing(effectiveLineSpacing)
             .lineLimit(config.lineLimit)
             .multilineTextAlignment(config.multilineAlignment?.textAlignment ?? .leading)
+            .modifier(SDUIMinimumScaleFactor(factor: scale == nil ? config.minimumScaleFactor : nil))
             .modifier(SDUIStyleModifier(style: config.style))
+    }
+
+    /// What a scale-group member must fit: its text, or a countdown's widest.
+    private func scaleMeasure(_ config: SDUIText) -> SDUIScaleMeasure {
+        let texts: [String]
+        if let countdown = config.countdown {
+            let units = (
+                hours: context.resolveTemplateText(countdown.units?.hours ?? ""),
+                minutes: context.resolveTemplateText(countdown.units?.minutes ?? ""),
+                seconds: context.resolveTemplateText(countdown.units?.seconds ?? "")
+            )
+            texts = SDUIScaleMeasure.widestCountdownTexts(countdown.format, units: units)
+        } else {
+            let resolved = resolveText(config)
+            texts = [config.highlightColor == nil ? resolved : SDUIInlineMarkup.parse(resolved).map(\.text).joined()]
+        }
+        let lineLimit = config.countdown != nil ? (config.lineLimit ?? 1) : config.lineLimit
+        let padding = config.style?.padding?.edgeInsets
+        return SDUIScaleMeasure(texts: texts, font: config.font ?? .unstyled, lineLimit: lineLimit, floor: config.minimumScaleFactor,
+                                inset: (padding?.leading ?? 0) + (padding?.trailing ?? 0))
     }
     
     /// Builds a `Text` whose `*marked*` runs carry `highlightColor`.
@@ -337,7 +417,7 @@ struct SDUIElementRenderer: View {
         baseColor: Color,
         highlightColor: Color
     ) -> Text {
-        SDUIInlineMarkup.parse(resolved).reduce(Text("")) { accumulated, run in
+        SDUIInlineMarkup.parse(resolved).reduce(Text(verbatim: "")) { accumulated, run in
             var piece = Text(run.text)
             if let font { piece = piece.applySDUIFont(font) }
             return accumulated + piece.foregroundColor(run.isHighlighted ? highlightColor : baseColor)
@@ -388,7 +468,13 @@ struct SDUIElementRenderer: View {
             let font = segment.font ?? defaultFont
             let color = resolveColor(segment.color) ?? defaultColor
 
-            var piece = TemplateText(segmentText, context: context.offerContext).text
+            // A property value is never templated, the same rule `resolveText` takes and
+            // the same one Android takes. It is admin-authored copy, so a `${...}` in it
+            // is a literal the admin typed, not a variable this SDK should resolve, and
+            // resolving it here would make the two platforms render the value differently.
+            var piece = segment.propertyKey == nil
+                ? TemplateText(segmentText, context: context.offerContext).text
+                : Text(segmentText)
             if let font { piece = piece.applySDUIFont(font) } else { piece = piece.font(.body) }
             result = result + piece.foregroundColor(color)
         }
@@ -396,13 +482,18 @@ struct SDUIElementRenderer: View {
         return result
     }
     
-    /// Resolves text from a segment, checking for bindings and substituting template placeholders
-    private func resolveSegmentText(_ segment: SDUITextSegment) -> String {
+    /// Resolves text from a segment, checking for bindings and substituting template
+    /// placeholders. A `propertyKey` value is returned as-is and is NOT templated by the
+    /// caller either. Internal for the same reason as `resolveText`.
+    func resolveSegmentText(_ segment: SDUITextSegment) -> String {
+        if let key = segment.propertyKey {
+            return resolveOfferProperty(key) ?? ""
+        }
         if let binding = segment.textBinding {
             return resolveTextBinding(binding)
         }
         // Resolve template placeholders (${variableName}) in the text
-        return context.resolveTemplateText(segment.text)
+        return context.resolveTemplateText(segment.text, row: offer)
     }
     
     // MARK: - System Image Renderer
@@ -410,9 +501,11 @@ struct SDUIElementRenderer: View {
     @ViewBuilder
     private func renderSystemImage(_ config: SDUISystemImage) -> some View {
         let image = Image(systemName: config.systemName)
+            .flipsForRightToLeftLayoutDirection(SDUISymbolDirection.mirrorsInRightToLeft(config.systemName))
             .font(config.font?.font)
             .foregroundColor(resolveColor(config.color))
             .modifier(SDUIStyleModifier(style: config.style))
+            .accessibilityHidden(Self.systemImageIsDecorative(insideControl: insideControl))
 
         if config.symbolEffect == "bounce" {
             #if compiler(>=6.0)
@@ -431,20 +524,28 @@ struct SDUIElementRenderer: View {
     
     // MARK: - Async Image Renderer
     
-    private func resolveImageUrl(_ config: SDUIAsyncImage) -> String? {
+    /// Internal so a test can drive the step branch directly.
+    func resolveImageUrl(_ config: SDUIAsyncImage) -> String? {
+        if config.urlBinding == .instructionImage { return instructionStep?.imageUrl }
         if let binding = config.urlBinding {
             return context.resolveCreativeUrl(binding, for: offer)
         }
         // Resolve template variables in static URLs (e.g., "${selectedOfferLogoUrl}")
         if let url = config.url {
-            let resolved = context.resolveTemplateText(url)
+            let resolved = context.resolveTemplateText(substituteHostItem(url))
             return resolved.contains("${") ? nil : resolved  // unresolved placeholder → no URL
         }
         return nil
     }
     
+    @ViewBuilder
     private func renderAsyncImage(_ config: SDUIAsyncImage) -> some View {
-        let url = URL(string: resolveImageUrl(config) ?? "")
+        let targetOffer = offer ?? context.currentOffer
+        let plan = SDUIImageSlotPlan(
+            binding: config.urlBinding,
+            imageUrl: resolveImageUrl(config),
+            tileLogoUrl: targetOffer?.tileLogoUrl,
+            isInsideOfferRow: isInsideOfferRow)
         let contentMode = config.contentMode?.contentMode ?? .fit
         let placeholderColor = resolveColor(config.placeholderColor) ?? context.appearance.semanticColor(.tertiarySystemFill)
 
@@ -454,15 +555,8 @@ struct SDUIElementRenderer: View {
         // don't represent the ad itself, so they don't fire impressions or
         // carry overlay config.
         let isPrimaryCreative = config.urlBinding == .offerPrimaryCreative
-        // The row owns the impression for every offer it renders, so the
-        // creative only reports for a featured offer drawn outside a row.
-        let isFallbackProbe = isPrimaryCreative && !isInsideOfferRow
 
-        let overlayConfig: SDUIOverlayConfig? = {
-            guard isPrimaryCreative else { return nil }
-            let targetOffer = offer ?? context.currentOffer
-            return targetOffer?.displayOverlayConfig
-        }()
+        let overlayConfig: SDUIOverlayConfig? = isPrimaryCreative ? targetOffer?.displayOverlayConfig : nil
 
         // Placeholder-only aspect ratio. Priority: creative (authoritative) →
         // variant-level hint (existing DSL contract) → default. Once the image
@@ -471,17 +565,16 @@ struct SDUIElementRenderer: View {
             ?? config.aspectRatio
             ?? 1412.0/596.0
 
-        // Fallback impression source: the LOADED primary creative, ≥ 50%
-        // visible, and only outside an offer row. Inside a row the row reports,
-        // whether or not this image loaded. The viewModel owns the dedup
-        // ledger.
-        let onLoadedVisible: (() -> Void)? = isFallbackProbe ? {
+        // Fallback impression source, only for a featured offer outside a row:
+        // the LOADED primary creative, or the logo tile of an offer with no
+        // picture, ≥ 50% visible. The viewModel owns the dedup ledger.
+        let reportImpression: (() -> Void)? = plan.probe == .none ? nil : {
             let resolvedOffer = offer ?? context.currentOffer
             guard let resolvedOffer,
                   let idx = context.offers.firstIndex(where: { $0.id == resolvedOffer.id })
             else { return }
             context.onOfferVisible?(resolvedOffer, idx, .creative)
-        } : nil
+        }
 
         // A creative that fails to load is reported, not swallowed. It used to
         // read as "never shown", which understates the denominator of every
@@ -493,21 +586,47 @@ struct SDUIElementRenderer: View {
             SDUICreativeFailureReporter.report(failure)
         } : nil
 
-        return CachedAsyncImage(
-            url: url,
-            contentMode: contentMode,
-            placeholder: { placeholderColor.aspectRatio(placeholderAspectRatio, contentMode: contentMode) },
-            onLoadedVisible: onLoadedVisible,
-            onLoadFailed: onLoadFailed
-        )
+        // The logo tile stands in for the picture, so it carries the same name.
+        let accessibilityLabel = Self.imageAccessibilityLabel(
+            binding: config.urlBinding, offer: targetOffer, strings: context.strings)
+
         // Identity follows the OFFER as well as the url, matching Android's
         // latch key. With creatives prewarmed the cache hit lands in the same
         // update that cleared the image, so the probed view kept its identity
         // and `onVisible` never re-ran: focus moving to a second featured gift
         // reported nothing at all.
-        .id(SDUIFeaturedProbeIdentity(offerId: (offer ?? context.currentOffer)?.id, url: url))
-        .modifier(SDUIStyleModifier(style: config.style))
-        .modifier(CreativeOverlayModifier(config: overlayConfig, context: context))
+        switch plan.content {
+        case .image(let url):
+            CachedAsyncImage(
+                url: url,
+                contentMode: contentMode,
+                placeholder: { placeholderColor.aspectRatio(placeholderAspectRatio, contentMode: contentMode) },
+                onLoadedVisible: plan.probe == .loadedImage ? reportImpression : nil,
+                onLoadFailed: onLoadFailed,
+                // Variants also draw the logo through the static `${selectedOfferLogoUrl}` template.
+                widthPoints: config.urlBinding == .offerLogoImage || config.url == "${selectedOfferLogoUrl}"
+                    ? SDUIImageLoader.logoWidthPoints : nil
+            )
+            .modifier(SDUIImageAccessibility(label: accessibilityLabel))
+            .id(SDUIFeaturedProbeIdentity(offerId: targetOffer?.id, url: url))
+            .modifier(SDUIStyleModifier(style: config.style))
+            .modifier(CreativeOverlayModifier(config: overlayConfig, context: context))
+        case .logoTile(let logoURL):
+            SDUILogoTile(
+                logoURL: logoURL,
+                // The variant's placeholder colour when it sets one, as Android
+                // does, else the surface colour web's card uses.
+                background: resolveColor(config.placeholderColor)
+                    ?? context.appearance.semanticColor(.secondarySystemBackground),
+                aspectRatio: placeholderAspectRatio,
+                contentMode: contentMode,
+                onVisible: plan.probe == .tile ? reportImpression : nil
+            )
+            .modifier(SDUIImageAccessibility(label: accessibilityLabel))
+            .id(SDUIFeaturedProbeIdentity(offerId: targetOffer?.id, url: logoURL))
+            .modifier(SDUIStyleModifier(style: config.style))
+            .modifier(CreativeOverlayModifier(config: overlayConfig, context: context))
+        }
     }
     
     // MARK: - Async Video Renderer
@@ -542,6 +661,7 @@ struct SDUIElementRenderer: View {
             Image(uiImage: uiImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
+                .modifier(SDUIImageAccessibility(label: Self.appIconAccessibilityLabel(context.offerContext.allVariables)))
                 .modifier(SDUIStyleModifier(style: config.style))
         }
         #endif
@@ -558,16 +678,19 @@ struct SDUIElementRenderer: View {
                 context: context,
                 label: SDUIElementRenderer(element: config.content, context: context, offer: offer, category: category, instructionStep: instructionStep)
                     .modifier(SDUIStyleModifier(style: config.style))
-                    .contentShape(Rectangle()),
+                    .contentShape(Rectangle())
+                    .environment(\.sduiInsideControl, true),
                 perform: { handleAction(config.action) }
             )
             .disabled((config.disabled ?? false)
-                || (config.action.type == .claimOffer && !context.isClaimEnabled))
+                || (config.action.type == .claimOffer && !context.isClaimEnabled)
+                || !context.allowsAction(config.action.type))
             // Same dimming the tap button applies. Without it a blocked claim
             // button looks live and does nothing when held.
             .opacity(Self.claimDisabledOpacity(
                 for: config.action.type, isClaimEnabled: context.isClaimEnabled))
             .accessibilityIdentifier(Self.uiTestIdentifier(for: config.action.type))
+            .modifier(SDUIAccessibilityLabel(text: Self.iconOnlyAccessibilityLabel(for: config, strings: context.strings)))
         } else {
             renderTapButton(config)
         }
@@ -575,7 +698,7 @@ struct SDUIElementRenderer: View {
 
     private func renderTapButton(_ config: SDUIButton) -> some View {
         let isClaimDisabled = config.action.type == .claimOffer && !context.isClaimEnabled
-        let isDisabled = (config.disabled ?? false) || isClaimDisabled
+        let isDisabled = (config.disabled ?? false) || isClaimDisabled || !context.allowsAction(config.action.type)
 
         // Render as a real `Button` rather than `.onTapGesture`. Inside a
         // horizontal carousel `ScrollView(.scrollClipDisabled(true))`, each
@@ -591,8 +714,9 @@ struct SDUIElementRenderer: View {
             SDUIElementRenderer(element: config.content, context: context, offer: offer, category: category, instructionStep: instructionStep)
                 .modifier(SDUIStyleModifier(style: config.style))
                 .contentShape(Rectangle())
+                .environment(\.sduiInsideControl, true)
         }
-        .buttonStyle(.plain)
+        .modifier(SDUIButtonPressModifier(pressed: config.pressedStyle))
         .contentShape(Rectangle())
         .disabled(isDisabled)
         .opacity(Self.claimDisabledOpacity(
@@ -602,6 +726,111 @@ struct SDUIElementRenderer: View {
         // non-leading cards are tappable (regression guard for #2); the sheet's
         // close button carries the documented id the demo UI suite asserts.
         .accessibilityIdentifier(Self.uiTestIdentifier(for: config.action.type))
+        .modifier(SDUIAccessibilityLabel(text: authoredAccessibilityText(config.accessibilityLabel)
+            ?? Self.iconOnlyAccessibilityLabel(for: config, strings: context.strings)))
+        .modifier(SDUIAccessibilityHint(text: authoredAccessibilityText(config.accessibilityHint)))
+        .modifier(SDUINestedAccessibilityActions(actions: nestedAccessibilityActions(config), perform: handleAction))
+    }
+
+    /// The buttons a tap could fire inside `element` (a card's arrow and x), depth first: only a
+    /// conditional's branch on show, never a forEach row's (each row is its own element), and never
+    /// a disabled, hold or (claims off) claim button, which a tap would not fire either.
+    func nestedButtons(in element: SDUIElement) -> [SDUIButton] {
+        switch element {
+        case .conditional(let conditional):
+            let shown = evaluateCondition(conditional.condition) ? conditional.ifTrue : conditional.ifFalse
+            return shown.map { nestedButtons(inChild: $0) } ?? []
+        case .forEach:
+            return []
+        default:
+            return element.children.flatMap { nestedButtons(inChild: $0) }
+        }
+    }
+
+    private func nestedButtons(inChild child: SDUIElement) -> [SDUIButton] {
+        guard case .button(let button) = child else { return nestedButtons(in: child) }
+        let live = !(button.disabled ?? false) && !button.isHoldButton
+            && !(button.action.type == .claimOffer && !context.isClaimEnabled)
+            && context.allowsAction(button.action.type)
+        return (live ? [button] : []) + nestedButtons(in: button.content)
+    }
+
+    /// A button's content reads to VoiceOver as one element, so the buttons inside it are its custom
+    /// actions, each named as the look names it (its spoken label, else an icon's built-in name).
+    func nestedAccessibilityActions(_ config: SDUIButton) -> [(label: String, action: SDUIAction)] {
+        nestedButtons(in: config.content).compactMap { button in
+            let label = authoredAccessibilityText(button.accessibilityLabel) ?? Self.iconOnlyAccessibilityLabel(for: button, strings: context.strings)
+            guard let label, !label.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return (label, button.action)
+        }
+    }
+
+    /// An authored a11y label or hint with `${...}` resolved, against this button's own offer row
+    /// as its drawn text is; nil when not authored.
+    func authoredAccessibilityText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        return context.resolveTemplateText(substituteHostItem(text), row: offer)
+    }
+
+    /// The spoken name of an icon-only close, share, back or panel-close button;
+    /// nil for a button that shows text, which names itself. A state change is
+    /// named by its first glyph only, as on Android: any other glyph is left alone.
+    static func iconOnlyAccessibilityLabel(for config: SDUIButton, strings: SDKStrings) -> String? {
+        guard !containsText(config.content) else { return nil }
+        switch config.action.type {
+        case .close: return strings[.modalClose]
+        case .share: return strings[.shareButton]
+        case .setState:
+            switch systemImageNames(config.content).first.flatMap(stateGlyph) {
+            case "xmark": return strings[.panelClose]
+            case .some: return strings[.navBack]
+            case nil: return nil
+            }
+        default: return nil
+        }
+    }
+
+    /// An offer-bound image's spoken name (`card.image` with the advertiser's name);
+    /// nil for static artwork and a step's image, which are decorative. Same rule as Android.
+    static func imageAccessibilityLabel(binding: SDUICreativeBinding?, offer: Offer?, strings: SDKStrings) -> String? {
+        guard let binding, binding != .instructionImage,
+              let name = offer?.advertiserName, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return strings.format(.cardImage, ["offerName": name])
+    }
+
+    /// A glyph outside a button is decorative, as on Android: VoiceOver would
+    /// otherwise read its English symbol name beside served copy. Inside a
+    /// button it stays, since it may be an unnamed icon-only button's name.
+    static func systemImageIsDecorative(insideControl: Bool) -> Bool {
+        !insideControl
+    }
+
+    /// The host app icon's spoken name: the dashboard `appName`.
+    static func appIconAccessibilityLabel(_ variables: [String: String]) -> String? {
+        variables["appName"].flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+    }
+
+    private static let stateGlyphs: Set<String> = ["chevron.left", "chevron.backward", "xmark"]
+
+    /// `name` or its nearest parent in `stateGlyphs`, trimming one SF Symbol modifier at a time.
+    private static func stateGlyph(_ name: String) -> String? {
+        var candidate = Substring(name)
+        while !stateGlyphs.contains(String(candidate)) {
+            guard let cut = candidate.lastIndex(of: "."), cut > candidate.startIndex else { return nil }
+            candidate = candidate[..<cut]
+        }
+        return String(candidate)
+    }
+
+    private static func systemImageNames(_ element: SDUIElement) -> [String] {
+        let own: [String] = if case .systemImage(let image) = element { [image.systemName] } else { [] }
+        return own + element.children.flatMap(systemImageNames)
+    }
+
+    private static func containsText(_ element: SDUIElement) -> Bool {
+        if case .text = element { return true }
+        return element.children.contains(where: containsText)
     }
     
     /// Selects `selected` for a `selectOffer` action. Shared by the generic
@@ -652,6 +881,10 @@ struct SDUIElementRenderer: View {
     /// window churn, not the code under test. Same reason `evaluateCondition`
     /// and `resolveValueRef` are internal.
     func handleAction(_ action: SDUIAction) {
+        guard context.allowsAction(action.type) else {
+            Logger.debug("[SDUI] \(action.type) ignored: a Yes is waiting for the server")
+            return
+        }
         // Track button tap analytics
         context.trackButtonTap(actionType: action.type)
         
@@ -692,9 +925,14 @@ struct SDUIElementRenderer: View {
             context.incrementOffersClaimed()
             // Delegate to external handler
             context.onAction(action, offer ?? context.currentOffer)
-        case .close, .openUrl, .triggerIAP, .submitLead, .share:
+        case .close, .openUrl, .triggerIAP, .submitLead, .share, .reportCompletion:
             // Delegate to external handler
             context.onAction(action, offer ?? context.currentOffer)
+        case .trigger, .dismissTrigger:
+            // The trigger host acts on these; a sheet's handler treats them as a no-op.
+            context.onAction(action, nil)
+        case .unknown:
+            Logger.warn("[SDUI] Unknown action type on a button; ignoring the tap")
         }
     }
     
@@ -781,6 +1019,15 @@ struct SDUIElementRenderer: View {
             }
             .scrollTargetLayout()
             .modifier(SDUIStyleModifier(style: config.style))
+        } else if triggerTree {
+            // Sized before its spacers, as Android's inline stack: a shrinkable title keeps its room.
+            SDUITriggerHStackLayout(spacing: spacing, alignment: alignment) {
+                ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
+                    SDUIElementRenderer(element: child, context: context, offer: offer, category: category, instructionStep: instructionStep, isCurrentPage: isCurrentPage)
+                        .layoutValue(key: SDUIStackRole.self, value: SDUIStackRole.role(child))
+                }
+            }
+            .modifier(SDUIStyleModifier(style: config.style))
         } else {
             HStack(alignment: alignment, spacing: spacing) {
                 ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
@@ -791,13 +1038,21 @@ struct SDUIElementRenderer: View {
         }
     }
     
+    @ViewBuilder
     private func renderZStack(_ config: SDUIStack) -> some View {
-        ZStack(alignment: config.alignment?.alignment ?? .center) {
-            ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
-                SDUIElementRenderer(element: child, context: context, offer: offer, category: category, instructionStep: instructionStep, isCurrentPage: isCurrentPage)
-            }
+        let alignment = config.alignment?.alignment ?? .center
+        let children = ForEach(Array(config.children.enumerated()), id: \.offset) { _, child in
+            SDUIElementRenderer(element: child, context: context, offer: offer, category: category, instructionStep: instructionStep, isCurrentPage: isCurrentPage)
         }
-        .modifier(SDUIStyleModifier(style: config.style))
+        // A trigger zStack under a capped frame hugs its content; its own frame, if any, sets the
+        // caps for its children, so the stack reads the ones around it.
+        if triggerTree, frameCaps.horizontal || frameCaps.vertical {
+            SDUITriggerZStackLayout(alignment: alignment, fills: config.children.map(SDUITriggerZStackLayout.fills), caps: frameCaps) { children }
+                .modifier(SDUIStyleModifier(style: config.style))
+        } else {
+            ZStack(alignment: alignment) { children }
+                .modifier(SDUIStyleModifier(style: config.style))
+        }
     }
     
     // MARK: - Spacer Renderer
@@ -840,30 +1095,48 @@ struct SDUIElementRenderer: View {
         
         switch config.type {
         case .rectangle:
-            Rectangle().fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
+            Rectangle().fill(fillColor)
+                .modifier(SDUIStrokeModifier(shape: Rectangle(), color: resolveColor(config.strokeColor), width: config.strokeWidth))
+                .modifier(SDUIStyleModifier(style: config.style))
         case .roundedRectangle:
-            RoundedRectangle(cornerRadius: config.cornerRadius ?? 0).fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
+            RoundedRectangle(cornerRadius: config.cornerRadius ?? 0).fill(fillColor)
+                .modifier(SDUIStrokeModifier(shape: RoundedRectangle(cornerRadius: config.cornerRadius ?? 0), color: resolveColor(config.strokeColor), width: config.strokeWidth))
+                .modifier(SDUIStyleModifier(style: config.style))
         case .circle:
-            Circle().fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
+            Circle().fill(fillColor)
+                .modifier(SDUIStrokeModifier(shape: Circle(), color: resolveColor(config.strokeColor), width: config.strokeWidth))
+                .modifier(SDUIStyleModifier(style: config.style))
         case .capsule:
-            Capsule().fill(fillColor).modifier(SDUIStyleModifier(style: config.style))
+            Capsule().fill(fillColor)
+                .modifier(SDUIStrokeModifier(shape: Capsule(), color: resolveColor(config.strokeColor), width: config.strokeWidth))
+                .modifier(SDUIStyleModifier(style: config.style))
+        case .ellipse:
+            Ellipse().fill(fillColor).modifier(SDUIStrokeModifier(shape: Ellipse(), color: resolveColor(config.strokeColor), width: config.strokeWidth))
+                .modifier(SDUIStyleModifier(style: config.style))
         }
     }
     
     // MARK: - Gradient Renderer
     
+    @ViewBuilder
     private func renderGradient(_ config: SDUIGradient) -> some View {
         let colors = config.colors.map { stop in
             (resolveColor(stop.color) ?? .clear).opacity(stop.opacity ?? 1.0)
         }
         
-        return LinearGradient(
-            colors: colors,
-            startPoint: config.direction.startPoint,
-            endPoint: config.direction.endPoint
-        )
-        .modifier(SDUIStyleModifier(style: config.style))
-        .allowsHitTesting(false)
+        if config.type == .radial {
+            RadialGradient(colors: colors, center: .center, startRadius: config.startRadius ?? 0, endRadius: config.endRadius ?? 0)
+                .modifier(SDUIStyleModifier(style: config.style))
+                .allowsHitTesting(false)
+        } else {
+            LinearGradient(
+                colors: colors,
+                startPoint: config.direction.startPoint,
+                endPoint: config.direction.endPoint
+            )
+            .modifier(SDUIStyleModifier(style: config.style))
+            .allowsHitTesting(false)
+        }
     }
     
     // MARK: - ScrollView Renderer
@@ -1018,6 +1291,9 @@ struct SDUIElementRenderer: View {
                 // Each item, for the same reason a row gets it.
                 .modifier(SDUIStyleModifier(style: config.style))
             }
+        case .hostList:
+            // Reached only through `renderHostListForEach`; kept for exhaustiveness.
+            renderHostListForEach(config)
         }
     }
 
@@ -1305,10 +1581,11 @@ struct SDUIElementRenderer: View {
         // NEW: Generic state machine conditions
         case .stateEquals(let state):
             return context.isState(state)
+        // Row-aware, like the text: a card's own value (or its hidden prize) gates its lines.
         case .valueEquals(let key, let value):
-            return context.valueEquals(key: key, value: value)
+            return context.textValues(row: offer)[key] == value
         case .hasValue(let key):
-            return context.hasValue(key: key)
+            return context.textValues(row: offer)[key] != nil
         case .hasIntroOffer:
             return context.offerContext.iap.hasIntroOffer
         case .hasFreeTrial:
@@ -1330,6 +1607,19 @@ struct SDUIElementRenderer: View {
             return !evaluateCondition(condition)
         case .hasOfferAttribute(let attribute):
             return resolveOfferAttribute(attribute) != nil
+        case .hasOfferProperty(let key):
+            // Campaign drops blanks at decode, so presence here means renderable.
+            return resolveOfferProperty(key) != nil
+        case .hasInstructionSubtitle:
+            guard let step = instructionStep else { return false }
+            let subtitle = step.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = step.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            // lowercased(), not caseInsensitiveCompare: Android compares the same way.
+            return !subtitle.isEmpty && subtitle.lowercased() != title.lowercased()
+        case .hasInstructionImage:
+            return instructionStep?.imageUrl != nil
+        case .listCountAtLeast(let list, let min):
+            return hostListHasAtLeast(list, min)
         case .equals(let lhs, let rhs):
             // Two UNSET operands are not a match. `offerAttribute` made that the
             // common case: most campaigns carry no badge, so comparing a row's
@@ -1365,7 +1655,7 @@ struct SDUIElementRenderer: View {
         case .literal(let value):
             return value
         case .binding(let key):
-            return context.values[key]
+            return context.textValues(row: offer)[key]
         case .state:
             return context.currentState
         case .offerIndex:
@@ -1391,6 +1681,9 @@ struct SDUIElementRenderer: View {
         case .shareUrl: return scoped.shareUrl
         case .termsUrl: return scoped.termsUrl
         case .quickInstructions: return scoped.displayQuickInstructions
+        case .instructions:
+            let steps = scoped.displayInstructions
+            return steps.isEmpty ? nil : String(steps.count)
         }
     }
     
@@ -1753,6 +2046,7 @@ private struct SDUISlideButtonView: View {
 
     @State private var dragOffset: CGFloat = 0
     @State private var isCompleted = false
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var shimmerOffset: CGFloat = -200
     @State private var bounceOffset: CGFloat = 0
     @State private var bounceTimer: Timer?
@@ -1833,21 +2127,25 @@ private struct SDUISlideButtonView: View {
                     .fill(isDisabled ? Color(UIColor.systemGray4) : thumbColor)
                     .frame(width: thumbSize, height: thumbSize)
                     .overlay(
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.system(size: 16, weight: .bold))
                             .foregroundColor(isDisabled ? Color(UIColor.systemGray2) : .white)
                     )
                     .shadow(color: (isDisabled ? Color.clear : thumbColor).opacity(0.3), radius: 4, y: 2)
                     .offset(x: inset + dragOffset + bounceOffset)
+                    // `offset(x:)` already mirrors under RTL; the drag is read in
+                    // global (physical) space so its sign is explicit too.
                     .gesture(
-                        DragGesture()
+                        DragGesture(coordinateSpace: .global)
                             .onChanged { value in
-                                guard !isCompleted, !isDisabled else { return }
+                                // Blocked while a Yes waits: the thumb never moves, so it can't latch.
+                                guard !isCompleted, !isDisabled, context.allowsAction(config.action.type) else { return }
                                 bounceOffset = 0 // Stop bounce hint on interaction
-                                dragOffset = min(max(0, value.translation.width), maxDrag)
+                                let forward = ForwardDrag.distance(value.translation.width, in: layoutDirection)
+                                dragOffset = min(max(0, forward), maxDrag)
                             }
                             .onEnded { _ in
-                                guard !isCompleted, !isDisabled else { return }
+                                guard !isCompleted, !isDisabled, context.allowsAction(config.action.type) else { return }
                                 if dragOffset > maxDrag * completionThreshold {
                                     withAnimation(.easeOut(duration: 0.15)) {
                                         isCompleted = true
@@ -2312,7 +2610,7 @@ extension UIValues {
     /// - Parameter template: The template string with `${variableName}` placeholders
     /// - Returns: A TemplateText that will resolve placeholders using this configuration
     func text(_ template: String) -> TemplateText {
-        TemplateText(template, context: OfferContext(uiValues: self))
+        TemplateText(template, context: OfferContext(uiValues: self, servedLocale: nil))
     }
     
     /// Creates a TemplateText from an optional template string.
@@ -2322,7 +2620,7 @@ extension UIValues {
     ///   - fallback: The fallback value if template is nil
     /// - Returns: A TemplateText that will resolve placeholders using this configuration
     func text(_ template: String?, or fallback: String) -> TemplateText {
-        TemplateText(template ?? fallback, context: OfferContext(uiValues: self))
+        TemplateText(template ?? fallback, context: OfferContext(uiValues: self, servedLocale: nil))
     }
 }
 
@@ -2334,7 +2632,7 @@ extension Optional where Wrapped == UIValues {
     /// - Parameter template: The template string with `${variableName}` placeholders
     /// - Returns: A TemplateText that will resolve placeholders if configuration exists
     func text(_ template: String) -> TemplateText {
-        TemplateText(template, context: OfferContext(uiValues: self))
+        TemplateText(template, context: OfferContext(uiValues: self, servedLocale: nil))
     }
     
     /// Creates a TemplateText from an optional template string.
@@ -2344,7 +2642,7 @@ extension Optional where Wrapped == UIValues {
     ///   - fallback: The fallback value if template is nil
     /// - Returns: A TemplateText that will resolve placeholders if configuration exists
     func text(_ template: String?, or fallback: String) -> TemplateText {
-        TemplateText(template ?? fallback, context: OfferContext(uiValues: self))
+        TemplateText(template ?? fallback, context: OfferContext(uiValues: self, servedLocale: nil))
     }
 }
 
@@ -2359,7 +2657,7 @@ extension Text {
     /// modifier. Applying `.font()` alone — which every call site used to do —
     /// silently dropped any authored tracking.
     func applySDUIFont(_ font: SDUIFont) -> Text {
-        let sized = self.font(font.font)
+        let sized = self.font(font.monospacedDigits == true ? font.font.monospacedDigit() : font.font)
         guard let tracking = font.tracking else { return sized }
         return sized.tracking(tracking)
     }
@@ -2413,13 +2711,13 @@ private struct SDUIHoldButton<Label: View>: View {
             // these the offer cannot be claimed with assistive tech at all. The
             // tap path gets both free from `Button`; this path is a raw view.
             .accessibilityAddTraits(.isButton)
-            .accessibilityHint("Double tap and hold to activate")
+            .accessibilityHint(Text(verbatim: context.strings[.holdToActivateHint]))
             .accessibilityAction { perform() }
     }
 
     private func beginHold() {
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        guard let holdState = config.onHoldState else { return }
+        guard let holdState = config.onHoldState, context.allowsAction(config.action.type) else { return }
         stateBeforeHold = context.currentState
         context.setState(holdState)
     }
@@ -2441,4 +2739,50 @@ private struct SDUIHoldButton<Label: View>: View {
 struct SDUIFeaturedProbeIdentity: Hashable {
     let offerId: String?
     let url: URL?
+}
+
+/// Names a meaningful image; hides a decorative one (no label) from VoiceOver.
+private struct SDUIImageAccessibility: ViewModifier {
+    let label: String?
+
+    func body(content: Content) -> some View {
+        if let label {
+            content
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: label))
+                .accessibilityAddTraits(.isImage)
+        } else {
+            content.accessibilityHidden(true)
+        }
+    }
+}
+
+/// The buttons inside a button, as its VoiceOver custom actions (none: unchanged).
+private struct SDUINestedAccessibilityActions: ViewModifier {
+    let actions: [(label: String, action: SDUIAction)]
+    let perform: (SDUIAction) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if actions.isEmpty {
+            content
+        } else {
+            actions.reduce(AnyView(content)) { view, entry in
+                AnyView(view.accessibilityAction(named: Text(verbatim: entry.label)) { perform(entry.action) })
+            }
+        }
+    }
+}
+
+/// Sets an accessibility label only when there is one to set.
+private struct SDUIAccessibilityLabel: ViewModifier {
+    let text: String?
+
+    func body(content: Content) -> some View {
+        if let text {
+            content.accessibilityLabel(Text(verbatim: text))
+        } else {
+            content
+        }
+    }
 }

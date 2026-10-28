@@ -16,11 +16,21 @@ struct RemoteConfiguration: Codable, Sendable {
     let ui: UIConfiguration
     let entitlements: EntitlementConfiguration
     let experiments: ExperimentConfiguration
+    /// The locale the backend served this copy in (response `locale`). Nil on
+    /// a pre-localization backend. Reported on analytics as `locale`.
+    let locale: String?
+    /// The request's host language override and Accept-Language value: the
+    /// disk stamp. A mismatch means the copy is another language's.
+    let language: String?
+    let deviceLocale: String?
 
-    init(from dto: DTO.RemoteConfig.ConfigResponseEnvelope) {
-        self.ui = UIConfiguration(from: dto.ui)
+    init(from dto: DTO.RemoteConfig.ConfigResponseEnvelope, language: String? = nil, deviceLocale: String? = nil) {
+        self.ui = UIConfiguration(from: dto.ui, experimentId: dto.uiExperimentId)
         self.entitlements = EntitlementConfiguration(from: dto.entitlements)
         self.experiments = ExperimentConfiguration(from: dto.experiments)
+        self.locale = dto.locale
+        self.language = language
+        self.deviceLocale = deviceLocale
     }
 
     /// Builds the configuration for a use case carried in the `useCases`
@@ -29,15 +39,22 @@ struct RemoteConfiguration: Codable, Sendable {
     /// The block holds only the UI half. `entitlements` and `experiments`
     /// describe the *app*, not the surface, so they come from the same
     /// response's top-level blocks — which is exactly what a dedicated
-    /// `?useCase=` fetch would have returned for them.
+    /// `?useCase=` fetch would have returned for them. So do the locales.
     init(
         prefetched: DTO.RemoteConfig.UseCaseDefault,
+        servedStrings: UIValues? = nil,
         entitlements: EntitlementConfiguration,
-        experiments: ExperimentConfiguration
+        experiments: ExperimentConfiguration,
+        locale: String? = nil,
+        language: String? = nil,
+        deviceLocale: String? = nil
     ) {
-        self.ui = UIConfiguration(from: prefetched)
+        self.ui = UIConfiguration(from: prefetched, servedStrings: servedStrings)
         self.entitlements = entitlements
         self.experiments = experiments
+        self.locale = locale
+        self.language = language
+        self.deviceLocale = deviceLocale
     }
 
     /// Composes a configuration from parts. Used by rung 2 of the availability
@@ -46,11 +63,28 @@ struct RemoteConfiguration: Codable, Sendable {
     init(
         ui: UIConfiguration,
         entitlements: EntitlementConfiguration,
-        experiments: ExperimentConfiguration
+        experiments: ExperimentConfiguration,
+        locale: String? = nil,
+        language: String? = nil,
+        deviceLocale: String? = nil
     ) {
         self.ui = ui
         self.entitlements = entitlements
         self.experiments = experiments
+        self.locale = locale
+        self.language = language
+        self.deviceLocale = deviceLocale
+    }
+
+    /// This configuration with its copy dropped and its app facts kept, for a
+    /// session whose locale differs from the one it was resolved in. The
+    /// variant is dropped too: its template is that language's.
+    func withoutCopy() -> RemoteConfiguration {
+        RemoteConfiguration(
+            ui: UIConfiguration(variantId: nil, values: ui.values.withoutCopy(), template: nil),
+            entitlements: entitlements,
+            experiments: experiments
+        )
     }
 }
 
@@ -70,11 +104,19 @@ struct RemoteConfigurationBundle: Sendable {
     let useCase: UseCase
     let configuration: RemoteConfiguration
     let prefetched: [UseCase: RemoteConfiguration]
+    /// App-level, not per use case. Nil when the server predates the field.
+    let ruledPlacements: RuledPlacements?
 
-    init(from dto: DTO.RemoteConfig.ConfigResponseEnvelope, requestedFor useCase: UseCase) {
-        let configuration = RemoteConfiguration(from: dto)
+    init(
+        from dto: DTO.RemoteConfig.ConfigResponseEnvelope,
+        requestedFor useCase: UseCase,
+        language: String? = nil,
+        deviceLocale: String? = nil
+    ) {
+        let configuration = RemoteConfiguration(from: dto, language: language, deviceLocale: deviceLocale)
         self.useCase = useCase
         self.configuration = configuration
+        self.ruledPlacements = dto.ruledPlacements.map(RuledPlacements.init)
 
         var prefetched: [UseCase: RemoteConfiguration] = [:]
         for (key, entry) in dto.useCases ?? [:] {
@@ -96,8 +138,12 @@ struct RemoteConfigurationBundle: Sendable {
             }
             prefetched[prefetchedUseCase] = RemoteConfiguration(
                 prefetched: entry,
+                servedStrings: configuration.ui.values,
                 entitlements: configuration.entitlements,
-                experiments: configuration.experiments
+                experiments: configuration.experiments,
+                locale: configuration.locale,
+                language: language,
+                deviceLocale: deviceLocale
             )
         }
         self.prefetched = prefetched
@@ -112,6 +158,8 @@ struct RemoteConfigurationBundle: Sendable {
 /// @unchecked Sendable: SDUIConfig is a value-type tree; safe for cross-thread access.
 struct UIConfiguration: Codable, @unchecked Sendable {
     let variantId: String?
+    /// Experiment that decided `variantId`; nil for a default, pinned, or holdout variant.
+    let experimentId: String?
     let variantName: String?
     let minSdkVersion: String?
     let values: UIValues
@@ -129,11 +177,12 @@ struct UIConfiguration: Codable, @unchecked Sendable {
     // Exclude template and the freshness marker from Codable
     // (SDUIConfig is Decodable-only; the marker is transient by design).
     enum CodingKeys: String, CodingKey {
-        case variantId, variantName, minSdkVersion, values
+        case variantId, experimentId, variantName, minSdkVersion, values
     }
 
-    init(from dto: DTO.RemoteConfig.UIConfig) {
+    init(from dto: DTO.RemoteConfig.UIConfig, experimentId: String?) {
         self.variantId = dto.variantId
+        self.experimentId = experimentId
         self.variantName = dto.variantName
         self.minSdkVersion = dto.minSdkVersion
         self.template = Self.parseTemplate(dto.template)
@@ -148,12 +197,14 @@ struct UIConfiguration: Codable, @unchecked Sendable {
     /// entry is a default variant rather than a resolution. Nothing in the SDK
     /// reads the field today, and inventing a value here would be worse than
     /// admitting its absence.
-    init(from dto: DTO.RemoteConfig.UseCaseDefault) {
+    init(from dto: DTO.RemoteConfig.UseCaseDefault, servedStrings: UIValues? = nil) {
         self.variantId = dto.variantId
+        self.experimentId = dto.experimentId
         self.variantName = dto.variantName
         self.minSdkVersion = nil
         self.template = Self.parseTemplate(dto.template)
-        self.values = UIValues(from: dto.values)
+        let values = UIValues(from: dto.values)
+        self.values = servedStrings.map(values.inheritingServedStrings(from:)) ?? values
         self.fromNetwork = true
     }
 
@@ -163,6 +214,7 @@ struct UIConfiguration: Codable, @unchecked Sendable {
     /// null-template branch without a network round trip.
     init(
         variantId: String?,
+        experimentId: String? = nil,
         variantName: String? = nil,
         minSdkVersion: String? = nil,
         values: UIValues = .empty,
@@ -170,6 +222,7 @@ struct UIConfiguration: Codable, @unchecked Sendable {
         fromNetwork: Bool = false
     ) {
         self.variantId = variantId
+        self.experimentId = experimentId
         self.variantName = variantName
         self.minSdkVersion = minSdkVersion
         self.values = values
@@ -180,6 +233,7 @@ struct UIConfiguration: Codable, @unchecked Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.variantId = try container.decodeIfPresent(String.self, forKey: .variantId)
+        self.experimentId = try container.decodeIfPresent(String.self, forKey: .experimentId)
         self.variantName = try container.decodeIfPresent(String.self, forKey: .variantName)
         self.minSdkVersion = try container.decodeIfPresent(String.self, forKey: .minSdkVersion)
         self.values = try container.decode(UIValues.self, forKey: .values)
@@ -238,12 +292,24 @@ struct UIValues: Codable, Sendable, Equatable {
     /// Null unless the publisher configured an override, and that is
     /// load-bearing: the template branches on whether the key is present.
     let rewardSubheadline: String?
+    /// Reward button and badge wording. Null when the variant words them in its
+    /// own template, in which case no token is served to substitute into.
+    let rewardCta: String?
+    let rewardDecline: String?
+    let rewardBadge: String?
+    let rewardMoreGifts: String?
+    let rewardOtherGifts: String?
 
     // Appearance values
     let appearanceMode: AppearanceMode?
     let accentColor: String?
     let accentTitleColor: String?
-    
+
+    /// SDK-owned copy in the response `locale`, by wire id (see `SDKStrings`).
+    /// Only ids the locale has are present; nil means English throughout.
+    let strings: [String: String]?
+    let plurals: [String: SDKStrings.PluralForms]?
+
     enum AppearanceMode: String, Codable {
         case light
         case dark
@@ -267,13 +333,54 @@ struct UIValues: Codable, Sendable, Equatable {
         self.customSubheadline = dto.text.customSubheadline
         self.rewardHeadline = dto.text.rewardHeadline
         self.rewardSubheadline = dto.text.rewardSubheadline
+        self.rewardCta = dto.text.rewardCta
+        self.rewardDecline = dto.text.rewardDecline
+        self.rewardBadge = dto.text.rewardBadge
+        self.rewardMoreGifts = dto.text.rewardMoreGifts
+        self.rewardOtherGifts = dto.text.rewardOtherGifts
 
         // Appearance
         self.appearanceMode = dto.appearance.mode.flatMap { AppearanceMode(rawValue: $0.rawValue) }
         self.accentColor = dto.appearance.accentColor
         self.accentTitleColor = dto.appearance.accentTitleColor
+
+        // Served SDK strings
+        self.strings = dto.strings?.additionalProperties
+        self.plurals = dto.plurals?.additionalProperties.mapValues {
+            SDKStrings.PluralForms(zero: $0.zero, one: $0.one, two: $0.two, few: $0.few, many: $0.many, other: $0.other)
+        }
+    }
+
+    /// These values with `source`'s SDK strings where this carries none. A
+    /// prefetched entry is served without them, but shares its response's locale.
+    func inheritingServedStrings(from source: UIValues) -> UIValues {
+        UIValues(
+            appName: appName, title: title, subtitle: subtitle, offerDescription: offerDescription,
+            instructionsTitle: instructionsTitle, lastStepHeader: lastStepHeader, lastStepDescription: lastStepDescription,
+            creditClaimedTitle: creditClaimedTitle, creditClaimedSubtitle: creditClaimedSubtitle, applyCreditsButton: applyCreditsButton,
+            accentTitle: accentTitle, customHeadline: customHeadline, customSubheadline: customSubheadline,
+            rewardHeadline: rewardHeadline, rewardSubheadline: rewardSubheadline,
+            rewardCta: rewardCta, rewardDecline: rewardDecline, rewardBadge: rewardBadge,
+            rewardMoreGifts: rewardMoreGifts, rewardOtherGifts: rewardOtherGifts,
+            appearanceMode: appearanceMode, accentColor: accentColor, accentTitleColor: accentTitleColor,
+            strings: strings ?? source.strings, plurals: plurals ?? source.plurals
+        )
     }
     
+    /// The app facts (name, appearance) with every piece of copy dropped.
+    func withoutCopy() -> UIValues {
+        UIValues(
+            appName: appName, title: nil, subtitle: nil, offerDescription: nil,
+            instructionsTitle: nil, lastStepHeader: nil, lastStepDescription: nil,
+            creditClaimedTitle: nil, creditClaimedSubtitle: nil, applyCreditsButton: nil,
+            accentTitle: nil, customHeadline: nil, customSubheadline: nil,
+            rewardHeadline: nil, rewardSubheadline: nil,
+            rewardCta: nil, rewardDecline: nil, rewardBadge: nil, rewardMoreGifts: nil, rewardOtherGifts: nil,
+            appearanceMode: appearanceMode, accentColor: accentColor, accentTitleColor: accentTitleColor,
+            strings: nil, plurals: nil
+        )
+    }
+
     /// Empty values for fallback scenarios
     static let empty = UIValues(
         appName: nil, title: nil, subtitle: nil, offerDescription: nil,
@@ -281,7 +388,9 @@ struct UIValues: Codable, Sendable, Equatable {
         creditClaimedTitle: nil, creditClaimedSubtitle: nil, applyCreditsButton: nil,
         accentTitle: nil, customHeadline: nil, customSubheadline: nil,
         rewardHeadline: nil, rewardSubheadline: nil,
-        appearanceMode: nil, accentColor: nil, accentTitleColor: nil
+        rewardCta: nil, rewardDecline: nil, rewardBadge: nil, rewardMoreGifts: nil, rewardOtherGifts: nil,
+        appearanceMode: nil, accentColor: nil, accentTitleColor: nil,
+        strings: nil, plurals: nil
     )
 
     private init(
@@ -290,7 +399,9 @@ struct UIValues: Codable, Sendable, Equatable {
         creditClaimedTitle: String?, creditClaimedSubtitle: String?, applyCreditsButton: String?,
         accentTitle: String?, customHeadline: String?, customSubheadline: String?,
         rewardHeadline: String?, rewardSubheadline: String?,
-        appearanceMode: AppearanceMode?, accentColor: String?, accentTitleColor: String?
+        rewardCta: String?, rewardDecline: String?, rewardBadge: String?, rewardMoreGifts: String?, rewardOtherGifts: String?,
+        appearanceMode: AppearanceMode?, accentColor: String?, accentTitleColor: String?,
+        strings: [String: String]?, plurals: [String: SDKStrings.PluralForms]?
     ) {
         self.appName = appName
         self.title = title
@@ -307,9 +418,16 @@ struct UIValues: Codable, Sendable, Equatable {
         self.customSubheadline = customSubheadline
         self.rewardHeadline = rewardHeadline
         self.rewardSubheadline = rewardSubheadline
+        self.rewardCta = rewardCta
+        self.rewardDecline = rewardDecline
+        self.rewardBadge = rewardBadge
+        self.rewardMoreGifts = rewardMoreGifts
+        self.rewardOtherGifts = rewardOtherGifts
         self.appearanceMode = appearanceMode
         self.accentColor = accentColor
         self.accentTitleColor = accentTitleColor
+        self.strings = strings
+        self.plurals = plurals
     }
 }
 
